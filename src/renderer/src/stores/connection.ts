@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { setBaseURL, clearAuthToken } from '../api/http-client'
 import { useAuthStore } from './auth'
+import { useGatewayStore } from './gateway'
 
 export interface ServerConfig {
   id: string
@@ -51,6 +52,9 @@ export const useConnectionStore = defineStore('connection', () => {
     try {
       const authStore = useAuthStore()
       await authStore.login(server.username, password)
+      // Start SSE event stream after successful auth
+      const gwStore = useGatewayStore()
+      await gwStore.connect()
       currentServer.value = server
       status.value = 'connected'
     } catch {
@@ -60,6 +64,8 @@ export const useConnectionStore = defineStore('connection', () => {
   }
 
   async function disconnect() {
+    const gwStore = useGatewayStore()
+    gwStore.disconnect()
     const authStore = useAuthStore()
     await authStore.logout()
     clearAuthToken()
