@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import Sidebar from './Sidebar.vue'
 import TopBar from './TopBar.vue'
+import { useAlertNotifier } from '../../composables/useAlertNotifier'
+
+// Start native alert notifications when user is in the main layout (i.e. authenticated)
+useAlertNotifier()
 </script>
 
 <template>
