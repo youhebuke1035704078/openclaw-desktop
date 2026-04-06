@@ -6,6 +6,7 @@ import icon from '../../resources/icon.png?asset'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+let isQuitting = false
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -34,7 +35,7 @@ function createWindow(): void {
 
   // Hide to tray instead of closing
   mainWindow.on('close', (e) => {
-    if (!app.isQuitting) {
+    if (!isQuitting) {
       e.preventDefault()
       mainWindow?.hide()
     }
@@ -64,7 +65,7 @@ function createTray(): void {
     {
       label: '退出',
       click: () => {
-        app.isQuitting = true
+        isQuitting = true
         app.quit()
       }
     }
@@ -103,13 +104,6 @@ function registerIpcHandlers(): void {
   ipcMain.on('notify', (_, title: string, body: string) => {
     new Notification({ title, body }).show()
   })
-}
-
-// Extend app type for isQuitting flag
-declare module 'electron' {
-  interface App {
-    isQuitting?: boolean
-  }
 }
 
 app.whenReady().then(() => {
