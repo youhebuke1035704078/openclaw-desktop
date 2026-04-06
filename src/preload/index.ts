@@ -1,12 +1,33 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
-// Custom APIs for renderer
-const api = {}
+const api = {
+  getServers: (): Promise<
+    Array<{ id: string; name: string; url: string; username: string }>
+  > => ipcRenderer.invoke('store:getServers'),
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
+  saveServer: (server: {
+    id: string
+    name: string
+    url: string
+    username: string
+    password: string
+  }): Promise<void> => ipcRenderer.invoke('store:saveServer', server),
+
+  removeServer: (id: string): Promise<void> => ipcRenderer.invoke('store:removeServer', id),
+
+  decryptPassword: (id: string): Promise<string | null> =>
+    ipcRenderer.invoke('store:decryptPassword', id),
+
+  minimize: (): void => ipcRenderer.send('window:minimize'),
+  maximize: (): void => ipcRenderer.send('window:maximize'),
+  close: (): void => ipcRenderer.send('window:close'),
+
+  notify: (title: string, body: string): void => ipcRenderer.send('notify', title, body),
+
+  getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion')
+}
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
@@ -15,8 +36,8 @@ if (process.contextIsolated) {
     console.error(error)
   }
 } else {
-  // @ts-ignore (define in dts)
+  // @ts-ignore
   window.electron = electronAPI
-  // @ts-ignore (define in dts)
+  // @ts-ignore
   window.api = api
 }
