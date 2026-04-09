@@ -25,14 +25,25 @@ function dbg(...args: unknown[]) {
 
 let ws: WebSocket | null = null
 
+/** Safely close a WebSocket without throwing */
+function safeClose(socket: WebSocket | null, code?: number, reason?: string): void {
+  if (!socket) return
+  try {
+    socket.removeAllListeners()
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+      socket.close(code, reason)
+    }
+  } catch (e) {
+    dbg('safeClose error (suppressed):', e)
+  }
+}
+
 export function registerWsBridge(): void {
   ipcMain.handle('ws:connect', (event, url: string, origin?: string) => {
     dbg('ws:connect called, url =', url, 'origin =', origin)
     // Tear down previous connection
-    if (ws) {
-      try { ws.removeAllListeners(); ws.close() } catch { /* */ }
-      ws = null
-    }
+    safeClose(ws)
+    ws = null
 
     // Forward the renderer's own Origin so the gateway's allowedOrigins
     // check sees the same value it would from a normal browser connection.
@@ -80,9 +91,7 @@ export function registerWsBridge(): void {
   })
 
   ipcMain.on('ws:close', (_event, code?: number, reason?: string) => {
-    if (ws) {
-      try { ws.removeAllListeners(); ws.close(code, reason) } catch { /* */ }
-      ws = null
-    }
+    safeClose(ws, code, reason)
+    ws = null
   })
 }

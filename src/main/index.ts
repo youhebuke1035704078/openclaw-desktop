@@ -10,6 +10,14 @@ import { getServers, saveServer, removeServer, decryptPassword, isEncryptionAvai
 import { registerWsBridge } from './ws-bridge'
 import icon from '../../resources/icon.png?asset'
 
+// Prevent crash dialog from uncaught WebSocket / network errors
+process.on('uncaughtException', (err) => {
+  console.error('[main] uncaughtException:', err.message)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[main] unhandledRejection:', reason)
+})
+
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
