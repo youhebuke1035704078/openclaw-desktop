@@ -468,6 +468,20 @@ function resolveAbsDir(relativePath: string): string {
   return `${ws}/${relativePath}`
 }
 
+/** Check if workspace path is local (readable from this machine) */
+const isLocalWorkspace = ref<boolean | null>(null)
+async function checkLocalWorkspace(): Promise<boolean> {
+  if (isLocalWorkspace.value !== null) return isLocalWorkspace.value
+  if (!window.api?.fsReaddir || !currentWorkspace.value) {
+    isLocalWorkspace.value = false
+    return false
+  }
+  // Try reading the workspace root — if it fails, it's a remote path
+  const result = await window.api.fsReaddir(currentWorkspace.value)
+  isLocalWorkspace.value = result.ok
+  return result.ok
+}
+
 async function browsePath(path: string) {
   if (!currentWorkspace.value) {
     error.value = t('pages.files.noWorkspace')
@@ -478,10 +492,11 @@ async function browsePath(path: string) {
   error.value = ''
 
   try {
+    const useLocalFs = await checkLocalWorkspace()
     const absDir = resolveAbsDir(path)
 
-    // Use Electron local FS if available, else fallback to RPC
-    if (window.api?.fsReaddir) {
+    // Use Electron local FS only when workspace is on this machine
+    if (useLocalFs && window.api?.fsReaddir) {
       const result = await window.api.fsReaddir(absDir)
       if (!result.ok) {
         throw new Error(result.error || t('pages.files.loadFailed'))
@@ -495,7 +510,7 @@ async function browsePath(path: string) {
         extension: e.extension,
       }))
     } else {
-      // Fallback: RPC-based flat file list (only .md agent files)
+      // Remote connection: use RPC-based file list
       if (allFiles.value.length === 0) {
         const agentId = selectedAgentId.value || 'main'
         const result = await wsStore.rpc.listAgentFiles(agentId)
@@ -526,6 +541,7 @@ async function switchAgent(agentId: string) {
   currentPath.value = ''
   entries.value = []
   allFiles.value = []
+  isLocalWorkspace.value = null  // re-detect on next browse
 
   await memoryStore.fetchFiles(agentId)
 
@@ -559,12 +575,12 @@ function navigateToPath(index: number) {
 }
 
 async function readFileContent(filePath: string): Promise<{ content: string; encoding: string }> {
-  if (window.api?.fsReadFile) {
+  if (isLocalWorkspace.value && window.api?.fsReadFile) {
     const result = await window.api.fsReadFile(filePath)
     if (!result.ok) throw new Error(result.error || 'Read failed')
     return { content: result.content || '', encoding: result.encoding || 'utf-8' }
   }
-  // Fallback to RPC
+  // Remote: use RPC
   const agentId = selectedAgentId.value || 'main'
   const result = await wsStore.rpc.getAgentFile(agentId, filePath)
   return { content: result.file.content || '', encoding: 'utf-8' }
