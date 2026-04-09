@@ -70,9 +70,15 @@ class BridgedWebSocket {
       this.onerror?.()
     }))
 
-    // Kick off the connection in the main process, forwarding the
-    // renderer's origin so the gateway sees http://localhost:5173 etc.
-    api.wsConnect(url, window.location.origin)
+    // Derive the Origin from the gateway URL so the gateway's
+    // allowedOrigins check accepts it (renderer origin is file:// in production)
+    try {
+      const parsed = new URL(url)
+      const gatewayOrigin = `http${parsed.protocol === 'wss:' ? 's' : ''}://${parsed.host}`
+      api.wsConnect(url, gatewayOrigin)
+    } catch {
+      api.wsConnect(url, window.location.origin)
+    }
   }
 
   send(data: string): void {
