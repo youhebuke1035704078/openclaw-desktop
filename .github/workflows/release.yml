@@ -26,6 +26,7 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.zip
+            dist/*.yml
 
   build-windows:
     runs-on: windows-latest
@@ -41,7 +42,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: win-artifacts
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/*.yml
 
   build-linux:
     runs-on: ubuntu-latest
@@ -61,6 +64,7 @@ jobs:
             dist/*.AppImage
             dist/*.deb
             dist/*.snap
+            dist/*.yml
 
   release:
     needs: [build-mac, build-windows, build-linux]
