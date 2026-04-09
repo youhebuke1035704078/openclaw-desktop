@@ -113,6 +113,9 @@ export const useConnectionStore = defineStore('connection', () => {
       currentServer.value = server
       status.value = 'connected'
 
+      // Remember last connected server for auto-reconnect after app restart (e.g. update)
+      try { localStorage.setItem('lastConnectedServerId', serverId) } catch { /* */ }
+
       // Keep connectionStore.status in sync with wsStore.state for post-connect
       // state changes (e.g. WS drop → reconnecting → reconnected / failed)
       stopStateSync?.()
@@ -165,5 +168,25 @@ export const useConnectionStore = defineStore('connection', () => {
     status.value = 'disconnected'
   }
 
-  return { currentServer, status, servers, loadServers, addServer, deleteServer, connect, disconnect }
+  /**
+   * Try to auto-connect to the last used server (e.g. after update restart).
+   * Returns true on success, false if no last server or connect failed.
+   */
+  async function autoConnect(): Promise<boolean> {
+    const lastId = localStorage.getItem('lastConnectedServerId')
+    if (!lastId) return false
+
+    await loadServers()
+    const server = servers.value.find((s) => s.id === lastId)
+    if (!server) return false
+
+    try {
+      await connect(lastId)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  return { currentServer, status, servers, loadServers, addServer, deleteServer, connect, disconnect, autoConnect }
 })

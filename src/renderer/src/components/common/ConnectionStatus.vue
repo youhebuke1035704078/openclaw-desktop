@@ -12,7 +12,10 @@ const appDownloaded = ref(false)
 const appUpdateError = ref('')
 const appChecking = ref(false)
 
+const installCountdown = ref(0)
+
 const updateStatusText = computed(() => {
+  if (installCountdown.value > 0) return `${installCountdown.value}s 后自动安装...`
   if (appDownloaded.value) return '新版本已就绪'
   if (appDownloading.value) return `下载中 ${Math.round(appDownloadPercent.value)}%`
   if (appUpdateAvailable.value) return '检测到新版本'
@@ -51,6 +54,8 @@ onMounted(async () => {
           appDownloading.value = false
           appDownloaded.value = true
           appDownloadPercent.value = 100
+          // Auto-install after 3s countdown
+          startAutoInstall()
           break
         case 'error':
           appChecking.value = false
@@ -78,21 +83,23 @@ async function checkAppUpdate() {
   }
 }
 
-async function downloadAppUpdate() {
-  appUpdateError.value = ''
-  appDownloading.value = true
-  appDownloadPercent.value = 0
-  const api = (window as any).api
-  if (api?.updaterDownload) {
-    const result = await api.updaterDownload()
-    if (!result.ok && result.error) {
-      appDownloading.value = false
-      appUpdateError.value = result.error
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+
+function startAutoInstall() {
+  installCountdown.value = 3
+  countdownTimer = setInterval(() => {
+    installCountdown.value--
+    if (installCountdown.value <= 0) {
+      if (countdownTimer) clearInterval(countdownTimer)
+      countdownTimer = null
+      installAppUpdate()
     }
-  }
+  }, 1000)
 }
 
 function installAppUpdate() {
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
+  installCountdown.value = 0
   const api = (window as any).api
   if (api?.updaterInstall) {
     api.updaterInstall()
@@ -125,15 +132,16 @@ function installAppUpdate() {
 
       <!-- Download progress -->
       <NProgress
-        v-if="appDownloading"
+        v-if="appDownloading || appDownloaded"
         type="line"
         :percentage="Math.round(appDownloadPercent)"
         :show-indicator="true"
+        :status="appDownloaded ? 'success' : 'default'"
         style="margin-bottom: 8px;"
       />
 
       <NSpace :size="8">
-        <!-- No update detected yet: check button -->
+        <!-- No update: check button -->
         <NButton
           v-if="!appUpdateAvailable && !appDownloading && !appDownloaded"
           size="small"
@@ -144,30 +152,24 @@ function installAppUpdate() {
         >
           {{ appChecking ? '检查中...' : '检查新版本' }}
         </NButton>
-        <!-- Update available: download button -->
-        <NButton
-          v-if="appUpdateAvailable && !appDownloading && !appDownloaded"
-          size="small"
-          type="primary"
-          @click="downloadAppUpdate"
-        >
-          下载 v{{ appNewVersion }}
-        </NButton>
-        <!-- Downloaded: install button -->
+        <!-- Downloaded: install now (or wait for countdown) -->
         <NButton
           v-if="appDownloaded"
           size="small"
           type="primary"
           @click="installAppUpdate"
         >
-          立即安装并重启
+          {{ installCountdown > 0 ? `${installCountdown}s 后自动安装` : '立即安装' }}
         </NButton>
       </NSpace>
 
       <div v-if="appUpdateError" style="margin-top: 6px; font-size: 12px; color: #d03050;">
         {{ appUpdateError }}
       </div>
-      <div v-else-if="!appUpdateAvailable && !appDownloading && !appDownloaded && !appChecking && !appUpdateError" style="margin-top: 6px; font-size: 12px; color: var(--text-color-3);">
+      <div v-else-if="appDownloading" style="margin-top: 6px; font-size: 12px; color: var(--text-color-3);">
+        正在后台下载新版本...
+      </div>
+      <div v-else-if="!appUpdateAvailable && !appDownloading && !appDownloaded && !appChecking" style="margin-top: 6px; font-size: 12px; color: var(--text-color-3);">
         点击检查是否有新版本可用
       </div>
     </div>

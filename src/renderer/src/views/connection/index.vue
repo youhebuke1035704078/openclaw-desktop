@@ -152,6 +152,13 @@ async function probeServer() {
 }
 
 onMounted(async () => {
+  // Try auto-reconnect to last server (e.g. after update restart)
+  const ok = await connectionStore.autoConnect()
+  if (ok) {
+    router.replace({ name: 'Dashboard' })
+    return
+  }
+
   await connectionStore.loadServers()
   checkAllServers()
   if (window.api?.isEncryptionAvailable) {

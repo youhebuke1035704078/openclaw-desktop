@@ -474,7 +474,7 @@ function registerIpcHandlers(): void {
 
 // ── Auto-updater setup ──
 function setupAutoUpdater(): void {
-  autoUpdater.autoDownload = false
+  autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
 
   autoUpdater.on('checking-for-update', () => {
