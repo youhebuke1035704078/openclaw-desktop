@@ -14,6 +14,8 @@ import {
   NSpin,
   NAlert,
   NEmpty,
+  NSelect,
+  NProgress,
   useMessage,
 } from 'naive-ui'
 import {
@@ -25,6 +27,7 @@ import {
   PersonOutline,
   DesktopOutline,
   CheckmarkCircleOutline,
+  DownloadOutline,
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useWebSocketStore } from '@/stores/websocket'
@@ -52,6 +55,111 @@ const showRestartModal = ref(false)
 const restartDelaySec = ref(3)
 const restarting = ref(false)
 const restartResult = ref<{ ok: boolean; message: string } | null>(null)
+
+// ── OpenClaw upgrade ──
+const isUpdating = ref(false)
+const selectedVersion = ref('')
+const versionOptions = ref<Array<{ label: string; value: string }>>([])
+const isLoadingVersions = ref(false)
+const latestVersion = ref<string | null>(null)
+const updateStatusMessage = ref('')
+const updateProgress = ref(0)
+let progressTimer: ReturnType<typeof setInterval> | null = null
+
+const hasUpdate = computed(() => {
+  if (wsStore.gatewayVersion && latestVersion.value) {
+    return wsStore.gatewayVersion !== latestVersion.value
+  }
+  return false
+})
+
+async function fetchNpmVersions() {
+  isLoadingVersions.value = true
+  try {
+    const api = (window as any).api
+    if (!api?.npmVersions) return
+    const result = await api.npmVersions()
+    const versions: string[] = result.ok ? result.versions : []
+    if (versions.length > 0) {
+      latestVersion.value = versions[0]
+      versionOptions.value = versions.slice(0, 20).map((v: string) => ({ label: v, value: v }))
+      selectedVersion.value = versions[0]
+    }
+  } catch { /* */ } finally {
+    isLoadingVersions.value = false
+  }
+}
+
+function startProgressSim() {
+  updateProgress.value = 5
+  if (progressTimer) clearInterval(progressTimer)
+  progressTimer = setInterval(() => {
+    if (updateProgress.value < 85) updateProgress.value += Math.random() * 3 + 1
+    else if (updateProgress.value < 95) updateProgress.value += 0.5
+  }, 1000)
+}
+
+function stopProgressSim() {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
+}
+
+function parseRetryDelay(msg: string): number | null {
+  const m = /retry after (\d+)s/i.exec(msg)
+  return m ? parseInt(m[1]!, 10) * 1000 : null
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+async function handleUpgrade() {
+  if (!selectedVersion.value) return
+  const version = selectedVersion.value
+  isUpdating.value = true
+  updateProgress.value = 0
+  updateStatusMessage.value = '正在准备升级...'
+  startProgressSim()
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      updateStatusMessage.value = '正在通过网关升级 OpenClaw...'
+      const result = await wsStore.rpc.runUpdate({ version, restartDelayMs: 3000, timeoutMs: 180000 })
+      stopProgressSim()
+      if (result.ok) {
+        updateProgress.value = 100
+        const before = result.result?.before?.version || wsStore.gatewayVersion
+        const after = result.result?.after?.version || version
+        updateStatusMessage.value = result.restart?.ok
+          ? `升级成功 ${before} → ${after}，网关重启中...`
+          : `升级完成 ${before} → ${after}`
+        message.success(updateStatusMessage.value)
+      } else {
+        updateProgress.value = 100
+        updateStatusMessage.value = result.result?.reason || '升级失败'
+        message.error(updateStatusMessage.value)
+      }
+      break
+    } catch (err: any) {
+      const errMsg = err?.message || '未知错误'
+      const retryDelay = parseRetryDelay(errMsg)
+      if (retryDelay && attempt < 3) {
+        const secs = Math.ceil(retryDelay / 1000)
+        for (let s = secs; s > 0; s--) {
+          updateStatusMessage.value = `请求频率限制，${s} 秒后自动重试 (${attempt}/3)...`
+          await sleep(1000)
+        }
+        continue
+      }
+      stopProgressSim()
+      updateProgress.value = 0
+      updateStatusMessage.value = errMsg
+      message.error(`升级出错: ${errMsg}`)
+      break
+    }
+  }
+  isUpdating.value = false
+  setTimeout(() => { updateStatusMessage.value = ''; updateProgress.value = 0 }, 8000)
+}
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
@@ -159,6 +267,7 @@ async function confirmRestart() {
 
 onMounted(() => {
   void fetchData()
+  void fetchNpmVersions()
   refreshTimer = setInterval(() => {
     if (wsStore.state !== ConnectionState.CONNECTED) return
     void fetchData()
@@ -230,11 +339,62 @@ onUnmounted(() => {
           {{ restartResult.message }}
         </NAlert>
 
-        <!-- ─── AI Channels ─── -->
+        <!-- ─── OpenClaw Version Upgrade ─── -->
+        <NCard size="small" embedded style="margin-top: 12px;" class="svc-card" :class="hasUpdate ? 'svc-card--configured' : 'svc-card--running'">
+          <div class="svc-body">
+            <div class="svc-header">
+              <NSpace align="center" :size="8">
+                <NIcon :component="DownloadOutline" :color="hasUpdate ? '#f0a020' : '#18a058'" size="20" />
+                <NText strong>OpenClaw 版本管理</NText>
+              </NSpace>
+              <NTag v-if="!hasUpdate && latestVersion" type="success" :bordered="false" round size="small">已是最新</NTag>
+              <NTag v-else-if="hasUpdate" type="warning" :bordered="false" round size="small">有新版本</NTag>
+            </div>
+            <NSpace :size="12" class="svc-meta" wrap align="center">
+              <NText depth="3" style="font-size: 13px;">当前版本: {{ wsStore.gatewayVersion || '未知' }}</NText>
+              <NText v-if="latestVersion" depth="3" style="font-size: 13px;">最新版本: {{ latestVersion }}</NText>
+            </NSpace>
+            <div v-if="hasUpdate" style="margin-top: 12px;">
+              <NSpace align="center" :size="8">
+                <NText style="font-size: 13px;">升级到：</NText>
+                <NSelect
+                  v-model:value="selectedVersion"
+                  :options="versionOptions"
+                  size="small"
+                  style="width: 180px;"
+                  :disabled="isUpdating || isLoadingVersions"
+                  :loading="isLoadingVersions"
+                />
+                <NButton
+                  size="small"
+                  type="primary"
+                  @click="handleUpgrade"
+                  :loading="isUpdating"
+                  :disabled="isUpdating || !selectedVersion || isLoadingVersions"
+                >
+                  升级
+                </NButton>
+              </NSpace>
+              <NProgress
+                v-if="isUpdating || updateProgress > 0"
+                type="line"
+                :percentage="Math.round(updateProgress)"
+                :show-indicator="true"
+                :status="updateProgress >= 100 ? 'success' : 'default'"
+                style="margin-top: 8px;"
+              />
+              <NText v-if="updateStatusMessage" depth="3" style="font-size: 12px; display: block; margin-top: 4px;">
+                {{ updateStatusMessage }}
+              </NText>
+            </div>
+          </div>
+        </NCard>
+
+        <!-- ─── Channels ─── -->
         <div class="section-title">
           <NSpace align="center" :size="8">
             <NIcon :component="CloudOutline" size="18" />
-            <NText strong>{{ t('pages.system.channels') }}</NText>
+            <NText strong>频道管理</NText>
             <NTag v-if="channelList.length" :bordered="false" round size="small">{{ channelList.length }}</NTag>
           </NSpace>
         </div>
