@@ -482,20 +482,8 @@ function resolveAbsDir(relativePath: string): string {
   return `${ws}/${relativePath}`
 }
 
-/** Check if workspace path is local (readable from this machine) */
-const isLocalWorkspace = ref<boolean | null>(null)
-async function checkLocalWorkspace(): Promise<boolean> {
-  if (isLocalWorkspace.value !== null) return isLocalWorkspace.value
-  if (!window.api?.fsReaddir || !currentWorkspace.value) {
-    isLocalWorkspace.value = false
-    return false
-  }
-  // Try reading the gateway workspace root from local FS
-  const result = await window.api.fsReaddir(currentWorkspace.value)
-  console.log('[FilesPage] checkLocalWorkspace:', currentWorkspace.value, '→', result.ok ? 'LOCAL' : `REMOTE (${result.error})`)
-  isLocalWorkspace.value = result.ok
-  return result.ok
-}
+/** Whether the last browse used local FS (for readFileContent fallback) */
+const isLocalWorkspace = ref(false)
 
 async function browsePath(path: string) {
   if (!currentWorkspace.value) {
@@ -507,41 +495,44 @@ async function browsePath(path: string) {
   error.value = ''
 
   try {
-    const useLocalFs = await checkLocalWorkspace()
     const absDir = resolveAbsDir(path)
 
-    // Use Electron local FS only when workspace is on this machine
-    if (useLocalFs && window.api?.fsReaddir) {
-      console.log('[FilesPage] browsePath LOCAL:', absDir)
+    // Always try local FS first (no caching — avoids race conditions)
+    if (window.api?.fsReaddir) {
       const result = await window.api.fsReaddir(absDir)
-      if (!result.ok) {
-        throw new Error(result.error || t('pages.files.loadFailed'))
+      if (result.ok) {
+        console.log('[FilesPage] browsePath LOCAL:', absDir, `(${result.entries.length} items)`)
+        isLocalWorkspace.value = true
+        entries.value = result.entries.map((e) => ({
+          name: e.name,
+          path: e.path,
+          type: e.type,
+          size: e.size,
+          modifiedAt: e.mtimeMs ? new Date(e.mtimeMs).toISOString() : undefined,
+          extension: e.extension,
+        }))
+        currentPath.value = path
+        return
       }
-      entries.value = result.entries.map((e) => ({
-        name: e.name,
-        path: e.path,
-        type: e.type,
-        size: e.size,
-        modifiedAt: e.mtimeMs ? new Date(e.mtimeMs).toISOString() : undefined,
-        extension: e.extension,
-      }))
-    } else {
-      console.log('[FilesPage] browsePath RPC fallback, useLocalFs=', useLocalFs, 'workspace=', currentWorkspace.value)
-      // Remote connection: use RPC-based file list
-      if (allFiles.value.length === 0) {
-        const agentId = selectedAgentId.value || 'main'
-        const result = await wsStore.rpc.listAgentFiles(agentId)
-        allFiles.value = result.files || []
-      }
-      entries.value = allFiles.value.map((f) => ({
-        name: f.name,
-        path: f.path || f.name,
-        type: (f.type || (f.isDirectory ? 'directory' : 'file')) as 'file' | 'directory',
-        size: f.size,
-        modifiedAt: f.updatedAtMs ? new Date(f.updatedAtMs).toISOString() : undefined,
-        extension: f.name.includes('.') ? f.name.split('.').pop() : undefined,
-      }))
+      console.log('[FilesPage] local FS failed for', absDir, ':', result.error, '→ trying RPC')
     }
+
+    // Fallback: RPC-based file list (remote gateway)
+    isLocalWorkspace.value = false
+    if (allFiles.value.length === 0) {
+      const agentId = selectedAgentId.value || 'main'
+      const result = await wsStore.rpc.listAgentFiles(agentId)
+      allFiles.value = result.files || []
+    }
+    console.log('[FilesPage] browsePath RPC:', `${allFiles.value.length} files from gateway`)
+    entries.value = allFiles.value.map((f) => ({
+      name: f.name,
+      path: f.path || f.name,
+      type: (f.type || (f.isDirectory ? 'directory' : 'file')) as 'file' | 'directory',
+      size: f.size,
+      modifiedAt: f.updatedAtMs ? new Date(f.updatedAtMs).toISOString() : undefined,
+      extension: f.name.includes('.') ? f.name.split('.').pop() : undefined,
+    }))
 
     currentPath.value = path
   } catch (e: any) {
@@ -558,7 +549,6 @@ async function switchAgent(agentId: string) {
   currentPath.value = ''
   entries.value = []
   allFiles.value = []
-  isLocalWorkspace.value = null  // re-detect on next browse
 
   await memoryStore.fetchFiles(agentId)
 
