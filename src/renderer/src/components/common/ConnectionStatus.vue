@@ -1,12 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { NTag, NSpace, NButton, NPopover, NProgress } from 'naive-ui'
-import { useI18n } from 'vue-i18n'
-import { useWebSocketStore } from '@/stores/websocket'
-import { ConnectionState } from '@/api/types'
-
-const wsStore = useWebSocketStore()
-const { t } = useI18n()
 
 // ── Desktop App self-update ──
 const appVersion = ref('')
@@ -18,26 +12,10 @@ const appDownloaded = ref(false)
 const appUpdateError = ref('')
 const appChecking = ref(false)
 
-const status = computed(() => {
-  switch (wsStore.state) {
-    case ConnectionState.CONNECTED:
-      return { label: t('components.connectionStatus.connected'), type: 'success' as const }
-    case ConnectionState.CONNECTING:
-      return { label: t('components.connectionStatus.connecting'), type: 'info' as const }
-    case ConnectionState.RECONNECTING:
-      return { label: t('components.connectionStatus.reconnecting'), type: 'warning' as const }
-    case ConnectionState.FAILED:
-      return { label: t('components.connectionStatus.failed'), type: 'error' as const }
-    case ConnectionState.DISCONNECTED:
-    default:
-      return { label: t('components.connectionStatus.disconnected'), type: 'error' as const }
-  }
-})
-
 const updateStatusText = computed(() => {
   if (appDownloaded.value) return '新版本已就绪'
   if (appDownloading.value) return `下载中 ${Math.round(appDownloadPercent.value)}%`
-  if (appUpdateAvailable.value) return `可升级到 v${appNewVersion.value}`
+  if (appUpdateAvailable.value) return '检测到新版本'
   if (appChecking.value) return '检查中...'
   return '已是最新'
 })
@@ -45,14 +23,11 @@ const updateStatusText = computed(() => {
 let unsubUpdater: (() => void) | null = null
 
 onMounted(async () => {
-
-  // Load current app version
   const api = (window as any).api
   if (api?.getVersion) {
     appVersion.value = await api.getVersion()
   }
 
-  // Listen for updater status events from main process
   if (api?.onUpdaterStatus) {
     unsubUpdater = api.onUpdaterStatus((data: any) => {
       switch (data.event) {
@@ -123,8 +98,6 @@ function installAppUpdate() {
     api.updaterInstall()
   }
 }
-
-
 </script>
 
 <template>
@@ -139,15 +112,10 @@ function installAppUpdate() {
         size="small"
         :bordered="false"
         round
+        :type="appUpdateAvailable || appDownloading ? 'warning' : appDownloaded ? 'success' : 'default'"
         style="cursor: pointer;"
       >
         Desktop v{{ appVersion }} · {{ updateStatusText }}
-        <span
-          style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin: 0 4px 0 6px; vertical-align: middle;"
-          :style="{
-            backgroundColor: status.type === 'success' ? '#18a058' : status.type === 'warning' ? '#f0a020' : status.type === 'error' ? '#d03050' : '#2080f0'
-          }"
-        />{{ status.label }}
       </NTag>
     </template>
     <div style="padding: 12px;">
@@ -204,21 +172,4 @@ function installAppUpdate() {
       </div>
     </div>
   </NPopover>
-  <NTag
-    v-else
-    :type="status.type"
-    round
-    size="small"
-    :bordered="false"
-  >
-    <template #icon>
-      <span
-        style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px;"
-        :style="{
-          backgroundColor: status.type === 'success' ? '#18a058' : status.type === 'warning' ? '#f0a020' : status.type === 'error' ? '#d03050' : '#2080f0'
-        }"
-      />
-    </template>
-    {{ status.label }}
-  </NTag>
 </template>

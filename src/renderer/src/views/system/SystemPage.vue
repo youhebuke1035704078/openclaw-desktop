@@ -351,7 +351,11 @@ onUnmounted(() => {
               <NTag v-else-if="hasUpdate" type="warning" :bordered="false" round size="small">有新版本</NTag>
             </div>
             <NSpace :size="12" class="svc-meta" wrap align="center">
-              <NText depth="3" style="font-size: 13px;">当前版本: {{ wsStore.gatewayVersion || '未知' }}</NText>
+              <NText depth="3" style="font-size: 13px;">
+                当前版本: {{ wsStore.gatewayVersion || '未知' }}
+                <span v-if="!hasUpdate && latestVersion" style="color: #18a058; margin-left: 4px;">已是最新</span>
+                <span v-else-if="hasUpdate" style="color: #f0a020; margin-left: 4px;">检测到新版本</span>
+              </NText>
               <NText v-if="latestVersion" depth="3" style="font-size: 13px;">最新版本: {{ latestVersion }}</NText>
             </NSpace>
             <div v-if="hasUpdate" style="margin-top: 12px;">
