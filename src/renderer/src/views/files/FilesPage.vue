@@ -292,7 +292,15 @@ const selectedAgentId = computed({
   }
 })
 
-const currentWorkspace = computed(() => memoryStore.workspace)
+/** Use .openclaw root instead of workspace subdirectory */
+const currentWorkspace = computed(() => {
+  const ws = memoryStore.workspace
+  if (!ws) return ''
+  const idx = ws.indexOf('/.openclaw/')
+  if (idx >= 0) return ws.substring(0, idx + '/.openclaw'.length)
+  if (ws.endsWith('/.openclaw')) return ws
+  return ws
+})
 
 const pathParts = computed(() => {
   if (!currentPath.value || currentPath.value === '/') return []
