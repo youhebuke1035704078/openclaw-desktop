@@ -34,6 +34,14 @@ const status = computed(() => {
   }
 })
 
+const updateStatusText = computed(() => {
+  if (appDownloaded.value) return '新版本已就绪'
+  if (appDownloading.value) return `下载中 ${Math.round(appDownloadPercent.value)}%`
+  if (appUpdateAvailable.value) return `可升级到 v${appNewVersion.value}`
+  if (appChecking.value) return '检查中...'
+  return '已是最新'
+})
+
 let unsubUpdater: (() => void) | null = null
 
 onMounted(async () => {
@@ -120,103 +128,97 @@ function installAppUpdate() {
 </script>
 
 <template>
-  <NSpace :size="8" align="center">
-    <!-- Desktop App version & update -->
-    <NPopover
-      v-if="appVersion"
-      trigger="click"
-      placement="bottom"
-      :width="320"
-    >
-      <template #trigger>
-        <NTag
-          size="small"
-          :bordered="false"
-          round
-          :type="appDownloaded ? 'success' : appUpdateAvailable ? 'warning' : appDownloading ? 'warning' : 'default'"
-          style="cursor: pointer;"
-        >
-          {{
-            appDownloaded
-              ? `Desktop 新版本已就绪`
-              : appDownloading
-              ? `Desktop 下载中 ${Math.round(appDownloadPercent)}%`
-              : appUpdateAvailable
-              ? `Desktop 可升级到 v${appNewVersion}`
-              : `Desktop v${appVersion}`
-          }}
-        </NTag>
-      </template>
-      <div style="padding: 12px;">
-        <div style="margin-bottom: 8px; font-size: 13px;">
-          当前 Desktop 版本 v{{ appVersion }}{{ appUpdateAvailable && appNewVersion ? `，可升级到 v${appNewVersion}` : '' }}
-        </div>
-
-        <!-- Download progress -->
-        <NProgress
-          v-if="appDownloading"
-          type="line"
-          :percentage="Math.round(appDownloadPercent)"
-          :show-indicator="true"
-          style="margin-bottom: 8px;"
-        />
-
-        <NSpace :size="8">
-          <!-- No update detected yet: check button -->
-          <NButton
-            v-if="!appUpdateAvailable && !appDownloading && !appDownloaded"
-            size="small"
-            :type="appChecking ? 'default' : 'primary'"
-            :loading="appChecking"
-            :disabled="appChecking"
-            @click="checkAppUpdate"
-          >
-            {{ appChecking ? '检查中...' : '检查新版本' }}
-          </NButton>
-          <!-- Update available: download button -->
-          <NButton
-            v-if="appUpdateAvailable && !appDownloading && !appDownloaded"
-            size="small"
-            type="primary"
-            @click="downloadAppUpdate"
-          >
-            下载 v{{ appNewVersion }}
-          </NButton>
-          <!-- Downloaded: install button -->
-          <NButton
-            v-if="appDownloaded"
-            size="small"
-            type="primary"
-            @click="installAppUpdate"
-          >
-            立即安装并重启
-          </NButton>
-        </NSpace>
-
-        <div v-if="appUpdateError" style="margin-top: 6px; font-size: 12px; color: #d03050;">
-          {{ appUpdateError }}
-        </div>
-        <div v-else-if="!appUpdateAvailable && !appDownloading && !appDownloaded && !appChecking && !appUpdateError" style="margin-top: 6px; font-size: 12px; color: var(--text-color-3);">
-          点击检查是否有新版本可用
-        </div>
-      </div>
-    </NPopover>
-
-    <NTag
-      :type="status.type"
-      round
-      size="small"
-      :bordered="false"
-    >
-      <template #icon>
+  <NPopover
+    v-if="appVersion"
+    trigger="click"
+    placement="bottom"
+    :width="320"
+  >
+    <template #trigger>
+      <NTag
+        size="small"
+        :bordered="false"
+        round
+        style="cursor: pointer;"
+      >
+        Desktop v{{ appVersion }} · {{ updateStatusText }}
         <span
-          style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px;"
+          style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin: 0 4px 0 6px; vertical-align: middle;"
           :style="{
             backgroundColor: status.type === 'success' ? '#18a058' : status.type === 'warning' ? '#f0a020' : status.type === 'error' ? '#d03050' : '#2080f0'
           }"
-        />
-      </template>
-      {{ status.label }}
-    </NTag>
-  </NSpace>
+        />{{ status.label }}
+      </NTag>
+    </template>
+    <div style="padding: 12px;">
+      <div style="margin-bottom: 8px; font-size: 13px;">
+        当前 Desktop 版本 v{{ appVersion }}{{ appUpdateAvailable && appNewVersion ? `，可升级到 v${appNewVersion}` : '' }}
+      </div>
+
+      <!-- Download progress -->
+      <NProgress
+        v-if="appDownloading"
+        type="line"
+        :percentage="Math.round(appDownloadPercent)"
+        :show-indicator="true"
+        style="margin-bottom: 8px;"
+      />
+
+      <NSpace :size="8">
+        <!-- No update detected yet: check button -->
+        <NButton
+          v-if="!appUpdateAvailable && !appDownloading && !appDownloaded"
+          size="small"
+          :type="appChecking ? 'default' : 'primary'"
+          :loading="appChecking"
+          :disabled="appChecking"
+          @click="checkAppUpdate"
+        >
+          {{ appChecking ? '检查中...' : '检查新版本' }}
+        </NButton>
+        <!-- Update available: download button -->
+        <NButton
+          v-if="appUpdateAvailable && !appDownloading && !appDownloaded"
+          size="small"
+          type="primary"
+          @click="downloadAppUpdate"
+        >
+          下载 v{{ appNewVersion }}
+        </NButton>
+        <!-- Downloaded: install button -->
+        <NButton
+          v-if="appDownloaded"
+          size="small"
+          type="primary"
+          @click="installAppUpdate"
+        >
+          立即安装并重启
+        </NButton>
+      </NSpace>
+
+      <div v-if="appUpdateError" style="margin-top: 6px; font-size: 12px; color: #d03050;">
+        {{ appUpdateError }}
+      </div>
+      <div v-else-if="!appUpdateAvailable && !appDownloading && !appDownloaded && !appChecking && !appUpdateError" style="margin-top: 6px; font-size: 12px; color: var(--text-color-3);">
+        点击检查是否有新版本可用
+      </div>
+    </div>
+  </NPopover>
+  <NTag
+    v-else
+    :type="status.type"
+    round
+    size="small"
+    :bordered="false"
+  >
+    <template #icon>
+      <span
+        style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px;"
+        :style="{
+          backgroundColor: status.type === 'success' ? '#18a058' : status.type === 'warning' ? '#f0a020' : status.type === 'error' ? '#d03050' : '#2080f0'
+        }"
+      />
+    </template>
+    {{ status.label }}
+  </NTag>
 </template>
