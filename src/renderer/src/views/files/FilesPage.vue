@@ -292,21 +292,19 @@ const selectedAgentId = computed({
   }
 })
 
-/** Local home directory (fetched once from Electron main process) */
-const localHomedir = ref('')
-
-/** Resolved local workspace path: always prefer local ~/.openclaw */
+/** Derive the gateway server's .openclaw root from its workspace path */
 const currentWorkspace = computed(() => {
-  // If we have the local home directory, always use it
-  if (localHomedir.value) {
-    return `${localHomedir.value}/.openclaw`
-  }
-  // Fallback: derive from gateway workspace path
   const ws = memoryStore.workspace
   if (!ws) return ''
-  const idx = ws.indexOf('/.openclaw/')
-  if (idx >= 0) return ws.substring(0, idx + '/.openclaw'.length)
-  if (ws.endsWith('/.openclaw')) return ws
+  // Handle both Unix (/) and Windows (\) paths from gateway
+  const normalized = ws.replace(/\\/g, '/')
+  const idx = normalized.indexOf('/.openclaw/')
+  if (idx >= 0) {
+    // Return using original separators (don't normalize)
+    const cutLen = idx + '/.openclaw'.length
+    return ws.substring(0, cutLen)
+  }
+  if (normalized.endsWith('/.openclaw')) return ws
   return ws
 })
 
@@ -488,24 +486,11 @@ function resolveAbsDir(relativePath: string): string {
 const isLocalWorkspace = ref<boolean | null>(null)
 async function checkLocalWorkspace(): Promise<boolean> {
   if (isLocalWorkspace.value !== null) return isLocalWorkspace.value
-  if (!window.api?.fsReaddir) {
+  if (!window.api?.fsReaddir || !currentWorkspace.value) {
     isLocalWorkspace.value = false
     return false
   }
-
-  // Fetch local home directory if not yet available
-  if (!localHomedir.value && window.api?.getHomedir) {
-    try {
-      localHomedir.value = await window.api.getHomedir()
-    } catch { /* ignore */ }
-  }
-
-  if (!currentWorkspace.value) {
-    isLocalWorkspace.value = false
-    return false
-  }
-
-  // Try reading the workspace root
+  // Try reading the gateway workspace root from local FS
   const result = await window.api.fsReaddir(currentWorkspace.value)
   console.log('[FilesPage] checkLocalWorkspace:', currentWorkspace.value, '→', result.ok ? 'LOCAL' : `REMOTE (${result.error})`)
   isLocalWorkspace.value = result.ok
@@ -917,13 +902,6 @@ async function uploadPastedImage(_file: File) {
 }
 
 async function initialize() {
-  // Fetch local home directory early so currentWorkspace uses the local path
-  if (!localHomedir.value && window.api?.getHomedir) {
-    try {
-      localHomedir.value = await window.api.getHomedir()
-    } catch { /* ignore */ }
-  }
-
   if (memoryStore.agents.length === 0) {
     await memoryStore.fetchAgents()
   }
