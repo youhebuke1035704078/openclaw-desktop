@@ -346,17 +346,17 @@ onUnmounted(() => {
                 <NIcon :component="DownloadOutline" :color="hasUpdate ? '#f0a020' : '#18a058'" size="20" />
                 <NText strong>OpenClaw 版本管理</NText>
               </NSpace>
-              <NTag v-if="!hasUpdate && latestVersion" type="success" :bordered="false" round size="small">已是最新</NTag>
-              <NTag v-else-if="hasUpdate" type="warning" :bordered="false" round size="small">有新版本</NTag>
+              <NTag v-if="hasUpdate" type="warning" :bordered="false" round size="small">有新版本</NTag>
+              <NTag v-else-if="!isLoadingVersions" type="success" :bordered="false" round size="small">已是最新</NTag>
             </div>
             <NSpace :size="12" class="svc-meta" wrap align="center">
               <NText depth="3" style="font-size: 13px;">
                 当前版本: {{ wsStore.gatewayVersion || '未知' }}
-                <span v-if="isLoadingVersions" style="color: var(--text-color-3); margin-left: 4px;">版本检查中...</span>
-                <span v-else-if="!hasUpdate && latestVersion" style="color: #18a058; margin-left: 4px;">已是最新</span>
-                <span v-else-if="hasUpdate" style="color: #f0a020; margin-left: 4px;">检测到新版本</span>
+                <span v-if="isLoadingVersions" style="color: var(--text-color-3); margin-left: 6px;">版本检查中...</span>
+                <span v-else-if="hasUpdate" style="color: #f0a020; font-weight: 500; margin-left: 6px;">检测到新版本</span>
+                <span v-else style="color: #18a058; margin-left: 6px;">已是最新</span>
               </NText>
-              <NText v-if="latestVersion" depth="3" style="font-size: 13px;">最新版本: {{ latestVersion }}</NText>
+              <NText v-if="hasUpdate && latestVersion" depth="3" style="font-size: 13px;">最新版本: {{ latestVersion }}</NText>
             </NSpace>
             <div v-if="hasUpdate" style="margin-top: 12px;">
               <NSpace align="center" :size="8">
