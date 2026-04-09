@@ -7,7 +7,6 @@ import { ConnectionState } from '@/api/types'
 
 const wsStore = useWebSocketStore()
 const { t } = useI18n()
-const latestVersion = ref<string | null>(null)
 
 // ── Desktop App self-update ──
 const appVersion = ref('')
@@ -35,31 +34,9 @@ const status = computed(() => {
   }
 })
 
-async function fetchLatestVersion() {
-  try {
-    const api = (window as any).api
-    if (!api?.npmVersions) return
-    const result = await api.npmVersions()
-    const versions: string[] = result.ok ? result.versions : []
-    if (versions.length > 0) latestVersion.value = versions[0]
-  } catch { /* */ }
-}
-
-const updateVersionOptions = async () => {
-  if (wsStore.state === ConnectionState.CONNECTED) {
-    await fetchLatestVersion()
-  }
-}
-
-let unsubscribeConnected: (() => void) | null = null
 let unsubUpdater: (() => void) | null = null
 
 onMounted(async () => {
-  await updateVersionOptions()
-
-  unsubscribeConnected = wsStore.subscribe('connected', async () => {
-    await updateVersionOptions()
-  })
 
   // Load current app version
   const api = (window as any).api
@@ -103,8 +80,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  unsubscribeConnected?.()
-  unsubscribeConnected = null
   unsubUpdater?.()
   unsubUpdater = null
 })
@@ -227,15 +202,6 @@ function installAppUpdate() {
       </div>
     </NPopover>
 
-    <!-- OpenClaw Gateway version (plain text, upgrade moved to SystemPage) -->
-    <NTag
-      v-if="wsStore.gatewayVersion"
-      size="small"
-      :bordered="false"
-      round
-    >
-      OpenClaw {{ wsStore.gatewayVersion }}
-    </NTag>
     <NTag
       :type="status.type"
       round
