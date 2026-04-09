@@ -18,6 +18,20 @@ process.on('unhandledRejection', (reason) => {
   console.error('[main] unhandledRejection:', reason)
 })
 
+// ── Single instance lock: prevent duplicate app in taskbar ──
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
+
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
