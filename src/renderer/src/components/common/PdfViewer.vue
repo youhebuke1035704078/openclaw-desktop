@@ -8,6 +8,9 @@ import {
   ContractOutline,
 } from '@vicons/ionicons5'
 import VuePdfEmbed from 'vue-pdf-embed'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   url: string
@@ -119,13 +122,18 @@ watch(() => props.url, () => {
         <NButton size="tiny" quaternary @click="zoomIn" :disabled="scale >= 3">
           +
         </NButton>
-        <NButton size="tiny" quaternary @click="resetZoom" title="重置缩放">
-          重置
+        <NButton size="tiny" quaternary :title="t('components.pdfViewer.resetZoom')" @click="resetZoom">
+          {{ t('components.pdfViewer.reset') }}
         </NButton>
-        
+
         <div class="toolbar-divider"></div>
-        
-        <NButton size="tiny" quaternary @click="toggleFullscreen" :title="fullscreen ? '退出全屏' : '全屏'">
+
+        <NButton
+          size="tiny"
+          quaternary
+          :title="fullscreen ? t('components.pdfViewer.exitFullscreen') : t('components.pdfViewer.enterFullscreen')"
+          @click="toggleFullscreen"
+        >
           <template #icon><NIcon :component="fullscreen ? ContractOutline : ExpandOutline" /></template>
         </NButton>
       </NSpace>

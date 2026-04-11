@@ -36,6 +36,7 @@ import { useConfigStore } from '@/stores/config'
 import { useSkillStore } from '@/stores/skill'
 import { formatDate, truncate } from '@/utils/format'
 import { renderSimpleMarkdown } from '@/utils/markdown'
+import { safeGet, safeSet } from '@/utils/safe-storage'
 import type { ChatMessage, ChatMessageContent, Skill, SessionsUsageSession } from '@/api/types'
 
 const props = withDefaults(
@@ -746,7 +747,7 @@ const filteredQuickReplies = computed(() => {
 
 function loadQuickReplies() {
   try {
-    const raw = localStorage.getItem(QUICK_REPLY_STORAGE_KEY)
+    const raw = safeGet(QUICK_REPLY_STORAGE_KEY)
     if (!raw) {
       quickReplies.value = []
       return
@@ -779,7 +780,7 @@ function loadQuickReplies() {
 }
 
 function persistQuickReplies() {
-  localStorage.setItem(QUICK_REPLY_STORAGE_KEY, JSON.stringify(quickReplies.value))
+  safeSet(QUICK_REPLY_STORAGE_KEY, JSON.stringify(quickReplies.value))
 }
 
 function resetQuickReplyForm() {

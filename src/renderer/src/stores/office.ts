@@ -92,6 +92,13 @@ const AGENT_COLORS = [
   '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4',
 ]
 
+/**
+ * Per-target execution log cap. Long-running scenarios can push hundreds
+ * of log entries per task and would otherwise grow without bound, bloating
+ * memory and making every reactive update slower.
+ */
+const MAX_EXECUTION_LOG_ENTRIES = 500
+
 export const useOfficeStore = defineStore('office', () => {
   const wsStore = useWebSocketStore()
   const agentStore = useAgentStore()
@@ -277,6 +284,11 @@ export const useOfficeStore = defineStore('office', () => {
       target.executionLog = []
     }
     target.executionLog.push(logEntry)
+    // Cap per-target log to avoid unbounded growth on long-running scenarios.
+    // Keeps the most recent entries; oldest ones are discarded.
+    if (target.executionLog.length > MAX_EXECUTION_LOG_ENTRIES) {
+      target.executionLog.splice(0, target.executionLog.length - MAX_EXECUTION_LOG_ENTRIES)
+    }
   }
 
   function createScenario(params: { name: string; description: string }): Scenario {
@@ -669,7 +681,7 @@ export const useOfficeStore = defineStore('office', () => {
             message: `已创建智能体: ${template.name} (${template.role})`,
           })
         }
-      } catch (e) {
+      } catch {
         if (currentScenario.value) {
           addExecutionLog(currentScenario.value, {
             agentId: 'system',

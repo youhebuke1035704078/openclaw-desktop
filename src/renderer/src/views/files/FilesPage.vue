@@ -693,7 +693,15 @@ async function readFileContent(filePath: string): Promise<{ content: string; enc
   return { content: result.file.content || '', encoding: 'utf-8' }
 }
 
+// Monotonic request token used to ignore stale async reads. Rapid clicks
+// (e.g. user preview → preview another file before the first completes) would
+// otherwise race and leave the UI showing the earlier file's content under
+// the later file's label. Only the most recent request is allowed to mutate
+// the preview / editor state.
+let fileReadToken = 0
+
 async function openPreview(file: FileEntry) {
+  const token = ++fileReadToken
   selectedFile.value = file
   fileLoading.value = true
   fileContent.value = ''
@@ -702,6 +710,7 @@ async function openPreview(file: FileEntry) {
 
   try {
     const { content } = await readFileContent(file.path)
+    if (token !== fileReadToken) return
     fileContent.value = content
 
     const ext = file.extension?.toLowerCase() || ''
@@ -719,14 +728,16 @@ async function openPreview(file: FileEntry) {
 
     showPreviewModal.value = true
   } catch (e: any) {
+    if (token !== fileReadToken) return
     console.error('[FilesPage] openPreview error:', e)
     message.error(t('pages.files.readFileFailed') + ': ' + (e?.message || ''))
   } finally {
-    fileLoading.value = false
+    if (token === fileReadToken) fileLoading.value = false
   }
 }
 
 async function openEditor(file: FileEntry) {
+  const token = ++fileReadToken
   selectedFile.value = file
   fileLoading.value = true
   fileContent.value = ''
@@ -734,19 +745,22 @@ async function openEditor(file: FileEntry) {
 
   try {
     const { content } = await readFileContent(file.path)
+    if (token !== fileReadToken) return
     fileContent.value = content
     editedContent.value = fileContent.value
     showEditorModal.value = true
 
     await nextTick()
+    if (token !== fileReadToken) return
     if (editorTextarea.value) {
       editorTextarea.value.focus()
     }
   } catch (e: any) {
+    if (token !== fileReadToken) return
     console.error('[FilesPage] openEditor error:', e)
     message.error(t('pages.files.readFileFailed') + ': ' + (e?.message || ''))
   } finally {
-    fileLoading.value = false
+    if (token === fileReadToken) fileLoading.value = false
   }
 }
 
@@ -798,7 +812,7 @@ async function downloadFileDirect(file: FileEntry) {
     link.download = file.name
     link.click()
     URL.revokeObjectURL(url)
-  } catch (e: any) {
+  } catch {
     message.error(t('pages.files.readFileFailed'))
   }
 }

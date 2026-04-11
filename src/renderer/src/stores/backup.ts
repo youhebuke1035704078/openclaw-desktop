@@ -137,7 +137,10 @@ export const useBackupStore = defineStore('backup', () => {
     const task = createTask('create')
     updateTask(task.id, { status: 'running', progress: 5, message: '正在创建备份...' })
 
-    // Listen for progress
+    // Register the progress listener BEFORE invoking the backup so we can't
+    // miss early 'backup:progress' events. Always release it in finally so
+    // a throw between registration and the normal unsub site doesn't leak
+    // an IPC listener.
     let unsub: (() => void) | null = null
     if (api.onBackupProgress) {
       unsub = api.onBackupProgress((data: { progress: number; message: string; status: string }) => {
@@ -147,7 +150,6 @@ export const useBackupStore = defineStore('backup', () => {
 
     try {
       const result = await api.backupCreate()
-      unsub?.()
       if (!result.ok) {
         completeTask(task.id, undefined, result.error || '备份失败')
         throw new Error(result.error || '备份失败')
@@ -156,11 +158,13 @@ export const useBackupStore = defineStore('backup', () => {
       await fetchBackupList()
       return tasks.value.get(task.id)!
     } catch (e) {
-      unsub?.()
       if (!tasks.value.get(task.id)?.completedAt) {
         completeTask(task.id, undefined, (e as Error).message)
       }
       throw e
+    } finally {
+      unsub?.()
+      unsub = null
     }
   }
 
@@ -180,7 +184,6 @@ export const useBackupStore = defineStore('backup', () => {
 
     try {
       const result = await api.backupRestore(params.filename)
-      unsub?.()
       if (!result.ok) {
         completeTask(task.id, undefined, result.error || '恢复失败')
         throw new Error(result.error || '恢复失败')
@@ -188,11 +191,13 @@ export const useBackupStore = defineStore('backup', () => {
       completeTask(task.id, { filename: params.filename })
       return tasks.value.get(task.id)!
     } catch (e) {
-      unsub?.()
       if (!tasks.value.get(task.id)?.completedAt) {
         completeTask(task.id, undefined, (e as Error).message)
       }
       throw e
+    } finally {
+      unsub?.()
+      unsub = null
     }
   }
 

@@ -1,6 +1,7 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { useWebSocketStore } from './websocket'
+import { safeGet, safeSet, safeRemove } from '@/utils/safe-storage'
 import type { Skill } from '@/api/types'
 
 const STORAGE_KEY_SHOW_BUNDLED = 'openclaw_skill_show_bundled'
@@ -9,13 +10,13 @@ const STORAGE_KEY_CHAT_VISIBILITY = 'openclaw_skill_chat_visibility'
 const STORAGE_KEY_CHAT_HIDDEN_SKILLS = 'openclaw_skill_chat_hidden' // legacy
 
 function readStoredBool(key: string, defaultValue: boolean): boolean {
-  const raw = localStorage.getItem(key)
+  const raw = safeGet(key)
   if (raw === null) return defaultValue
   return raw === 'true'
 }
 
 function readStoredBooleanRecord(key: string): Record<string, boolean> {
-  const raw = localStorage.getItem(key)
+  const raw = safeGet(key)
   if (!raw) return {}
   try {
     const parsed = JSON.parse(raw) as unknown
@@ -36,7 +37,7 @@ function readStoredBooleanRecord(key: string): Record<string, boolean> {
 }
 
 function readStoredStringArray(key: string): string[] {
-  const raw = localStorage.getItem(key)
+  const raw = safeGet(key)
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as unknown
@@ -87,21 +88,21 @@ export const useSkillStore = defineStore('skill', () => {
 
   if (legacyHidden.length > 0) {
     // One-time migration from legacy hidden list to the overrides map.
-    localStorage.setItem(STORAGE_KEY_CHAT_VISIBILITY, JSON.stringify(mergedOverrides))
-    localStorage.removeItem(STORAGE_KEY_CHAT_HIDDEN_SKILLS)
+    safeSet(STORAGE_KEY_CHAT_VISIBILITY, JSON.stringify(mergedOverrides))
+    safeRemove(STORAGE_KEY_CHAT_HIDDEN_SKILLS)
   }
   const chatVisibilityOverrides = ref<Record<string, boolean>>(
     mergedOverrides
   )
 
   watch(showBundled, (val) => {
-    localStorage.setItem(STORAGE_KEY_SHOW_BUNDLED, String(val))
+    safeSet(STORAGE_KEY_SHOW_BUNDLED, String(val))
   })
   watch(showBundledInChat, (val) => {
-    localStorage.setItem(STORAGE_KEY_SHOW_BUNDLED_IN_CHAT, String(val))
+    safeSet(STORAGE_KEY_SHOW_BUNDLED_IN_CHAT, String(val))
   })
   watch(chatVisibilityOverrides, (val) => {
-    localStorage.setItem(STORAGE_KEY_CHAT_VISIBILITY, JSON.stringify(normalizeBooleanRecord(val)))
+    safeSet(STORAGE_KEY_CHAT_VISIBILITY, JSON.stringify(normalizeBooleanRecord(val)))
   }, { deep: true })
 
   const wsStore = useWebSocketStore()

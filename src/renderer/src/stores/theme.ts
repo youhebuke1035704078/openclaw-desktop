@@ -1,16 +1,17 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
+import { safeGet, safeSet } from '@/utils/safe-storage'
 
 export type ThemeMode = 'light' | 'dark'
 
 const STORAGE_KEY = 'openclaw_theme'
 
 export const useThemeStore = defineStore('theme', () => {
-  const stored = localStorage.getItem(STORAGE_KEY) as ThemeMode | null
-  const mode = ref<ThemeMode>(stored || 'dark')
+  const stored = safeGet(STORAGE_KEY) as ThemeMode | null
+  const mode = ref<ThemeMode>(stored === 'light' || stored === 'dark' ? stored : 'dark')
 
   watch(mode, (val) => {
-    localStorage.setItem(STORAGE_KEY, val)
+    safeSet(STORAGE_KEY, val)
     document.documentElement.setAttribute('data-theme', val)
   }, { immediate: true })
 

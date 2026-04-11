@@ -188,11 +188,16 @@ export const useMemoryStore = defineStore('memory', () => {
     lastError.value = null
     try {
       const result = await wsStore.rpc.listAgentFiles(agentId)
+      // Guard against rapid agent switches: only apply results if the
+      // agent we queried is still the active one. Prevents older responses
+      // from overwriting newer agent's file list.
+      if (agentId !== selectedAgentId.value) return
       workspace.value = result.workspace || ''
       files.value = sortKnownFiles(result.files)
       ensureKnownPlaceholders()
       ensureSelectedFileName()
     } catch (error) {
+      if (agentId !== selectedAgentId.value) return
       files.value = []
       workspace.value = ''
       ensureKnownPlaceholders()
@@ -200,28 +205,37 @@ export const useMemoryStore = defineStore('memory', () => {
       lastError.value = error instanceof Error ? error.message : String(error)
       console.error('[MemoryStore] fetchFiles failed:', error)
     } finally {
-      loadingFiles.value = false
+      if (agentId === selectedAgentId.value) {
+        loadingFiles.value = false
+      }
     }
   }
 
   async function loadFile(name = selectedFileName.value) {
     if (!selectedAgentId.value || !name) return
+    // Capture agentId at call time — rapid switches must not apply a stale
+    // file's content to the newly-selected agent.
+    const agentId = selectedAgentId.value
     selectedFileName.value = name
     loadingFileContent.value = true
     lastError.value = null
     try {
-      const result = await wsStore.rpc.getAgentFile(selectedAgentId.value, name)
+      const result = await wsStore.rpc.getAgentFile(agentId, name)
+      if (agentId !== selectedAgentId.value || name !== selectedFileName.value) return
       workspace.value = result.workspace || workspace.value
       upsertFile(result.file)
       files.value = sortKnownFiles(files.value)
       currentContent.value = result.file.content || ''
     } catch (error) {
+      if (agentId !== selectedAgentId.value || name !== selectedFileName.value) return
       currentContent.value = ''
       lastError.value = error instanceof Error ? error.message : String(error)
       console.error('[MemoryStore] loadFile failed:', error)
       throw error
     } finally {
-      loadingFileContent.value = false
+      if (agentId === selectedAgentId.value && name === selectedFileName.value) {
+        loadingFileContent.value = false
+      }
     }
   }
 
@@ -247,6 +261,8 @@ export const useMemoryStore = defineStore('memory', () => {
   async function switchAgent(agentId: string) {
     if (!agentId) return
     selectedAgentId.value = agentId
+    // fetchFiles / loadFile both guard against stale responses via
+    // selectedAgentId comparison, so rapid switches are race-safe.
     await fetchFiles(agentId)
     await loadFile(selectedFileName.value)
   }

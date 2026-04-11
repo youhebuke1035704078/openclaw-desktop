@@ -1,4 +1,5 @@
 import { getPreferredLocale } from '@/i18n/locale'
+import { safeGet, safeSet } from '@/utils/safe-storage'
 import { buildDeviceAuthPayload } from './device-auth-payload'
 import { loadOrCreateDeviceIdentity, signDevicePayload } from './device-identity'
 
@@ -44,10 +45,10 @@ function getClientVersion(): string {
 /** Persistent instance ID so the gateway can distinguish Desktop app instances */
 function getInstanceId(): string {
   const KEY = 'desktop-instance-id'
-  let id = localStorage.getItem(KEY)
+  let id = safeGet(KEY)
   if (!id) {
     id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
-    localStorage.setItem(KEY, id)
+    safeSet(KEY, id)
   }
   return id
 }

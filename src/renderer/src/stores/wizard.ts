@@ -480,14 +480,14 @@ export const useWizardStore = defineStore('wizard', () => {
     const mode = params?.mode || (task.mode as ExecuteTaskParams['mode']) || 'run'
 
     await updateTaskStatus(taskId, 'in_progress')
-    
-    addTaskExecutionEntry(taskId, {
+
+    await addTaskExecutionEntry(taskId, {
       agentId: 'system',
       type: 'start',
       message: `开始执行任务: ${task.title} (模式: ${mode})`,
     })
 
-    addScenarioExecutionLog(task.scenarioId, {
+    await addScenarioExecutionLog(task.scenarioId, {
       type: 'info',
       taskId,
       message: `开始执行任务: ${task.title}`,
@@ -495,7 +495,7 @@ export const useWizardStore = defineStore('wizard', () => {
 
     const coordinatorId = task.assignedAgents[0]
     if (!coordinatorId) {
-      addTaskExecutionEntry(taskId, {
+      await addTaskExecutionEntry(taskId, {
         agentId: 'system',
         type: 'error',
         message: '未指定执行者 Agent',
@@ -525,8 +525,8 @@ export const useWizardStore = defineStore('wizard', () => {
     taskMessage += `请开始执行此任务。`
 
     const sessionKey = `agent:${coordinatorId}:main:dm:task-${taskId}-${Date.now()}`
-    
-    addTaskExecutionEntry(taskId, {
+
+    await addTaskExecutionEntry(taskId, {
       agentId: coordinatorId,
       type: 'start',
       message: `向 ${coordinatorId} 发送任务指令`,
@@ -543,7 +543,7 @@ export const useWizardStore = defineStore('wizard', () => {
       task.sessionKey = sessionKey
       await saveTask(task)
 
-      addTaskExecutionEntry(taskId, {
+      await addTaskExecutionEntry(taskId, {
         agentId: coordinatorId,
         type: 'message',
         message: `任务已发送 (Run ID: ${result?.runId || 'N/A'})`,
@@ -551,7 +551,7 @@ export const useWizardStore = defineStore('wizard', () => {
         runId: result?.runId,
       })
 
-      addScenarioExecutionLog(task.scenarioId, {
+      await addScenarioExecutionLog(task.scenarioId, {
         type: 'success',
         taskId,
         agentId: coordinatorId,
@@ -571,15 +571,15 @@ export const useWizardStore = defineStore('wizard', () => {
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error'
-      
-      addTaskExecutionEntry(taskId, {
+
+      await addTaskExecutionEntry(taskId, {
         agentId: coordinatorId,
         type: 'error',
         message: `执行失败: ${errorMsg}`,
         sessionKey: task.sessionKey,
       })
 
-      addScenarioExecutionLog(task.scenarioId, {
+      await addScenarioExecutionLog(task.scenarioId, {
         type: 'error',
         taskId,
         agentId: coordinatorId,
@@ -598,7 +598,7 @@ export const useWizardStore = defineStore('wizard', () => {
       throw new Error('Scenario not found')
     }
 
-    addScenarioExecutionLog(scenarioId, {
+    await addScenarioExecutionLog(scenarioId, {
       type: 'info',
       message: '开始执行场景任务',
     })
@@ -615,7 +615,7 @@ export const useWizardStore = defineStore('wizard', () => {
       }
     }
 
-    addScenarioExecutionLog(scenarioId, {
+    await addScenarioExecutionLog(scenarioId, {
       type: 'success',
       message: '所有任务执行完成',
     })

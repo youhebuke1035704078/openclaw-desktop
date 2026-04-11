@@ -175,12 +175,10 @@ export class ApiClient {
   private openWebSocket(): void {
     try {
       const url = this.toWsUrl()
-      console.log('[ApiClient] Opening WebSocket to', url)
 
       // Prefer the Electron IPC bridge (main-process WS with custom Origin)
       // so the gateway's allowedOrigins check passes.
       const bridge = getWsBridge()
-      console.warn('[ApiClient] Bridge check:', !!bridge, 'wsConnect:', typeof (bridge as any)?.wsConnect, 'api keys:', bridge ? Object.keys(bridge as any).join(',') : 'null')
       if (bridge && typeof bridge.wsConnect === 'function') {
         const bws = new BridgedWebSocket(url)
         this.ws = bws

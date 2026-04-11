@@ -1,13 +1,13 @@
 import { app, shell, BrowserWindow, ipcMain, Tray, Menu, Notification, nativeImage, session, dialog } from 'electron'
 import { join, resolve, extname, basename } from 'path'
 import { execFile } from 'child_process'
-import { readdir, stat, readFile, mkdir, unlink, copyFile } from 'fs/promises'
+import { readdir, stat, readFile, mkdir, unlink, copyFile, realpath } from 'fs/promises'
 import { existsSync } from 'fs'
 import { homedir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import { getServers, saveServer, removeServer, decryptPassword, isEncryptionAvailable } from './store'
-import { registerWsBridge } from './ws-bridge'
+import { registerWsBridge, shutdownWsBridge } from './ws-bridge'
 import icon from '../../resources/icon.png?asset'
 
 // Prevent crash dialog from uncaught WebSocket / network errors
@@ -74,6 +74,37 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  // Defense-in-depth: deny any top-level navigation away from the bundled
+  // renderer. vue-router uses hash history so legitimate in-app navigation
+  // never triggers `will-navigate`. A compromised renderer (or injected
+  // markdown/html) trying to navigate to http(s)://… or file://… would
+  // otherwise leave the app shell. External links already go through
+  // setWindowOpenHandler → shell.openExternal above.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const allowedPrefixes: string[] = []
+    if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+      allowedPrefixes.push(process.env['ELECTRON_RENDERER_URL'])
+    }
+    // In production the renderer is loaded via loadFile(); will-navigate
+    // fires for anything that isn't the same file:// URL already rendered.
+    const isSameDoc = url.startsWith('file://') && url.includes('/renderer/index.html')
+    const isAllowedDev = allowedPrefixes.some((p) => url.startsWith(p))
+    if (!isSameDoc && !isAllowedDev) {
+      event.preventDefault()
+      // Forward external links to the system browser instead of swallowing.
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        shell.openExternal(url)
+      }
+    }
+  })
+
+  // Deny all permission requests by default (camera, microphone, geolocation,
+  // notifications via the Permissions API, etc.). The app does not legitimately
+  // need any of these — OS-level notifications go through main process via IPC.
+  mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => {
+    callback(false)
+  })
+
   // Hide to tray instead of closing
   mainWindow.on('close', (e) => {
     if (!isQuitting) {
@@ -120,10 +151,24 @@ function createTray(): void {
   })
 }
 
+/**
+ * Validate that a URL uses an allowed HTTP scheme before passing it to fetch().
+ * Blocks file://, data:, javascript:, and other dangerous schemes that could
+ * be used to read local files or execute code.
+ */
+function isSafeHttpUrl(url: string): boolean {
+  try {
+    const u = new URL(url)
+    return u.protocol === 'http:' || u.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 function registerIpcHandlers(): void {
   // Store: server config (wrapped in try-catch to prevent unhandled IPC failures)
   ipcMain.handle('store:getServers', () => {
-    try { return getServers() } catch (e: any) { return [] }
+    try { return getServers() } catch (_e) { return [] }
   })
   ipcMain.handle('store:saveServer', (_, server) => {
     try { return saveServer(server) } catch (e: any) { throw new Error(`Save failed: ${e.message}`) }
@@ -132,7 +177,7 @@ function registerIpcHandlers(): void {
     try { return removeServer(id) } catch (e: any) { throw new Error(`Remove failed: ${e.message}`) }
   })
   ipcMain.handle('store:decryptPassword', (_, id) => {
-    try { return decryptPassword(id) } catch (e: any) { return null }
+    try { return decryptPassword(id) } catch (_e) { return null }
   })
   ipcMain.handle('store:isEncryptionAvailable', () => {
     try { return isEncryptionAvailable() } catch { return false }
@@ -186,8 +231,12 @@ function registerIpcHandlers(): void {
     })
   })
 
-  // HTTP proxy — allows renderer to fetch from external URLs without CORS restrictions
+  // HTTP proxy — allows renderer to fetch from external URLs without CORS restrictions.
+  // URL scheme is validated to block file://, data:, javascript:, etc.
   ipcMain.handle('http:fetch', async (_, url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => {
+    if (!isSafeHttpUrl(url)) {
+      return { status: 0, ok: false, body: 'Blocked: only http/https URLs are allowed' }
+    }
     try {
       const res = await fetch(url, {
         method: init?.method || 'GET',
@@ -204,20 +253,27 @@ function registerIpcHandlers(): void {
   // Return local home directory path (for constructing ~/.openclaw path)
   ipcMain.handle('app:homedir', () => homedir())
 
-  // Local filesystem browsing (scoped to workspace directories)
+  // Local filesystem browsing (scoped to workspace directories).
+  // realpath() resolves symlinks so a `home/link → /etc` cannot bypass the
+  // home-directory check (TOCTOU hardening).
   ipcMain.handle('fs:readdir', async (_, dirPath: string) => {
     try {
-      // Security: only allow reading within home directory
-      const resolved = resolve(dirPath)
-      if (!resolved.startsWith(homedir())) {
+      const realHome = await realpath(homedir())
+      let realDir: string
+      try {
+        realDir = await realpath(resolve(dirPath))
+      } catch {
+        return { ok: false, error: 'Path does not exist', entries: [] }
+      }
+      if (realDir !== realHome && !realDir.startsWith(realHome + '/')) {
         return { ok: false, error: 'Access denied: path outside home directory', entries: [] }
       }
-      const items = await readdir(dirPath, { withFileTypes: true })
+      const items = await readdir(realDir, { withFileTypes: true })
       const entries = await Promise.all(
         items
           .filter((d) => !d.name.startsWith('.'))
           .map(async (d) => {
-            const fullPath = join(dirPath, d.name)
+            const fullPath = join(realDir, d.name)
             const isDir = d.isDirectory()
             let size: number | undefined
             let mtimeMs: number | undefined
@@ -252,20 +308,27 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('fs:readFile', async (_, filePath: string, encoding?: string) => {
     try {
-      // Security: only allow reading within home directory
-      const resolved = resolve(filePath)
-      if (!resolved.startsWith(homedir())) {
+      // Security: resolve symlinks before checking bounds to prevent TOCTOU
+      // symlink attacks (e.g. `~/link → /etc/passwd`).
+      const realHome = await realpath(homedir())
+      let realFile: string
+      try {
+        realFile = await realpath(resolve(filePath))
+      } catch {
+        return { ok: false, error: 'File does not exist' }
+      }
+      if (!realFile.startsWith(realHome + '/')) {
         return { ok: false, error: 'Access denied: path outside home directory' }
       }
-      const s = await stat(filePath)
+      const s = await stat(realFile)
       if (s.size > 10 * 1024 * 1024) {
         return { ok: false, error: 'File too large (>10MB)' }
       }
-      const ext = extname(filePath).replace('.', '').toLowerCase()
+      const ext = extname(realFile).replace('.', '').toLowerCase()
       const binaryExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp', 'pdf', 'zip', 'tar', 'gz', 'rar', '7z', 'mp4', 'mp3', 'wav']
       const isBinary = binaryExts.includes(ext)
-      const content = await readFile(filePath, isBinary ? 'base64' : (encoding || 'utf-8') as BufferEncoding)
-      return { ok: true, content, encoding: isBinary ? 'base64' : 'utf-8', name: basename(filePath), size: s.size }
+      const content = await readFile(realFile, isBinary ? 'base64' : (encoding || 'utf-8') as BufferEncoding)
+      return { ok: true, content, encoding: isBinary ? 'base64' : 'utf-8', name: basename(realFile), size: s.size }
     } catch (e: any) {
       return { ok: false, error: e.message }
     }
@@ -341,7 +404,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('backup:delete', async (_, filename: string) => {
     try {
-      if (!filename.endsWith('.tar.gz') || filename.includes('..')) {
+      if (!filename.endsWith('.tar.gz') || filename.includes('..') || filename.includes('/')) {
         return { ok: false, error: 'Invalid filename' }
       }
       await unlink(join(BACKUP_DIR, filename))
@@ -353,7 +416,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('backup:download', async (_, filename: string) => {
     try {
-      if (!filename.endsWith('.tar.gz') || filename.includes('..')) {
+      if (!filename.endsWith('.tar.gz') || filename.includes('..') || filename.includes('/')) {
         return { ok: false, error: 'Invalid filename' }
       }
       const srcPath = join(BACKUP_DIR, filename)
@@ -372,7 +435,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('backup:restore', async (event, filename: string) => {
     try {
-      if (!filename.endsWith('.tar.gz') || filename.includes('..')) {
+      if (!filename.endsWith('.tar.gz') || filename.includes('..') || filename.includes('/')) {
         return { ok: false, error: 'Invalid filename' }
       }
       const srcPath = join(BACKUP_DIR, filename)
@@ -384,7 +447,39 @@ function registerIpcHandlers(): void {
         }
       }
 
-      send(10, '正在解压备份...')
+      // Security: list tarball contents first and verify every entry lives
+      // under `.openclaw/`. Rejects absolute paths, `..` traversal, and any
+      // entry that would escape the openclaw data directory. Without this a
+      // malicious (or third-party) tarball placed into BACKUP_DIR could
+      // overwrite arbitrary files in $HOME when the user hits "restore".
+      send(5, '正在校验备份内容...')
+      const entries = await new Promise<string[]>((resolve, reject) => {
+        execFile(
+          'tar',
+          ['tzf', srcPath],
+          { timeout: 60000, maxBuffer: 16 * 1024 * 1024 },
+          (err, stdout) => {
+            if (err) reject(new Error(err.message))
+            else resolve(stdout.split('\n').map((s) => s.trim()).filter(Boolean))
+          }
+        )
+      })
+      for (const entry of entries) {
+        if (
+          entry.startsWith('/') ||
+          entry.startsWith('..') ||
+          entry.includes('/../') ||
+          entry.includes('\\') ||
+          !(entry === '.openclaw' || entry === '.openclaw/' || entry.startsWith('.openclaw/'))
+        ) {
+          return {
+            ok: false,
+            error: `Backup rejected: unsafe entry "${entry}". Only .openclaw/* paths are allowed.`,
+          }
+        }
+      }
+
+      send(15, '正在解压备份...')
 
       await new Promise<void>((resolve, reject) => {
         execFile('tar', [
@@ -412,8 +507,21 @@ function registerIpcHandlers(): void {
       })
       if (result.canceled || result.filePaths.length === 0) return { ok: false, error: 'Cancelled' }
       const src = result.filePaths[0]!
-      await mkdir(BACKUP_DIR, { recursive: true })
+      // Sanity-check the picked file before accepting it into BACKUP_DIR so
+      // we don't silently copy non-tar.gz files (the file-dialog filter is
+      // advisory on most platforms). A later `backup:restore` will also
+      // validate contents, but failing fast here is better UX.
       const name = basename(src)
+      if (!name.endsWith('.tar.gz') || name.includes('..') || name.includes('/')) {
+        return { ok: false, error: 'Invalid backup filename (must be *.tar.gz)' }
+      }
+      const srcStat = await stat(src)
+      // Cap upload size to 2 GB. A pathologically large tarball could fill
+      // the user's disk before anyone notices.
+      if (srcStat.size > 2 * 1024 * 1024 * 1024) {
+        return { ok: false, error: 'Backup file too large (>2GB)' }
+      }
+      await mkdir(BACKUP_DIR, { recursive: true })
       const dest = join(BACKUP_DIR, name)
       await copyFile(src, dest)
       const s = await stat(dest)
@@ -577,4 +685,11 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+// Clean up the main-process WebSocket bridge before the app terminates so the
+// gateway does not see a half-closed connection.
+app.on('before-quit', () => {
+  isQuitting = true
+  shutdownWsBridge()
 })

@@ -11,7 +11,9 @@ type SimpleMarkdownRenderOptions = {
 }
 
 const markdownRenderer = new MarkdownIt({
-  html: true,
+  // html: false escapes raw HTML in user content (chat messages, file content,
+  // memory notes). Custom token renderers below still emit HTML directly.
+  html: false,
   linkify: true,
   typographer: true,
   breaks: true,
@@ -27,37 +29,38 @@ function escapeHtml(str: string): string {
 }
 
 function generateCodeBlockWithLineNumbers(originalCode: string, lang: string): string {
+  // Whitelist the language identifier to safe chars before interpolating it
+  // into the class attribute. Without this, a fence like ```">...  would
+  // escape the class attribute and inject arbitrary HTML — `html: false`
+  // on markdown-it doesn't protect custom renderers that emit HTML directly.
+  const safeLang = /^[A-Za-z0-9][A-Za-z0-9+#._-]{0,31}$/.test(lang) ? lang : ''
+
   let highlighted = ''
-  
-  if (lang && hljs.getLanguage(lang)) {
+  if (safeLang && hljs.getLanguage(safeLang)) {
     try {
-      highlighted = hljs.highlight(originalCode, { language: lang, ignoreIllegals: true }).value
-    } catch (e) {
+      highlighted = hljs.highlight(originalCode, { language: safeLang, ignoreIllegals: true }).value
+    } catch {
       highlighted = escapeHtml(originalCode)
     }
   } else {
     highlighted = escapeHtml(originalCode)
   }
-  
+
   // 移除末尾的换行符，避免产生多余的空行号
   const trimmedHighlighted = highlighted.replace(/\n+$/, '')
   const lines = trimmedHighlighted.split('\n')
-  
+
   let lineNumbersHtml = ''
   for (let i = 1; i <= lines.length; i++) {
     lineNumbersHtml += `<span class="line-number">${i}</span>\n`
   }
-  
-  const escapedOriginalCode = originalCode
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-  
+
+  const escapedOriginalCode = escapeHtml(originalCode)
+  const classLang = safeLang || 'plaintext'
+
   return `<div class="code-block-container">
 <div class="code-line-numbers">${lineNumbersHtml}</div>
-<div class="code-content"><code class="language-${lang || 'plaintext'}">${trimmedHighlighted}</code></div>
+<div class="code-content"><code class="language-${classLang}">${trimmedHighlighted}</code></div>
 <button class="code-copy-btn" data-code="${escapedOriginalCode}" title="Copy code"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
 </div>`
 }
@@ -91,24 +94,45 @@ function renderLatex(content: string, displayMode: boolean = false): string {
   }
 }
 
-function processLatex(content: string): string {
-  let result = content
-  
-  // 处理块级公式 $$...$$ (支持跨多行)
-  result = result.replace(/\$\$([\s\S]*?)\$\$/g, (_, math) => {
+/**
+ * Extract LaTeX expressions and replace with placeholders that survive
+ * markdown-it rendering. The caller must restore them via restoreLatex().
+ * This lets us keep markdown-it `html: false` (XSS-safe for user content)
+ * while still rendering LaTeX as HTML.
+ */
+type LatexExtract = { text: string; segments: string[]; token: string }
+
+function extractLatex(content: string): LatexExtract {
+  const segments: string[] = []
+  // Use a random token per render so user content can't collide.
+  const token = `xKATEX${Math.random().toString(36).slice(2, 10)}x`
+  const placeholder = (i: number): string => `${token}${i}${token}`
+
+  // Block-level $$...$$ (multi-line)
+  let text = content.replace(/\$\$([\s\S]*?)\$\$/g, (_, math) => {
     const trimmed = math.trim()
     if (!trimmed) return ''
-    return `<div class="katex-display">${renderLatex(trimmed, true)}</div>`
+    const i = segments.length
+    segments.push(`<div class="katex-display">${renderLatex(trimmed, true)}</div>`)
+    return placeholder(i)
   })
-  
-  // 处理行内公式 $...$ (不跨行)
-  result = result.replace(/\$([^\$\n]+?)\$/g, (_, math) => {
+
+  // Inline $...$ (single-line)
+  text = text.replace(/\$([^\$\n]+?)\$/g, (_, math) => {
     const trimmed = math.trim()
     if (!trimmed) return ''
-    return renderLatex(trimmed, false)
+    const i = segments.length
+    segments.push(renderLatex(trimmed, false))
+    return placeholder(i)
   })
-  
-  return result
+
+  return { text, segments, token }
+}
+
+function restoreLatex(html: string, extract: LatexExtract): string {
+  if (extract.segments.length === 0) return html
+  const pattern = new RegExp(`${extract.token}(\\d+)${extract.token}`, 'g')
+  return html.replace(pattern, (_, idx) => extract.segments[Number(idx)] || '')
 }
 
 let headingCounters: number[] = [0, 0, 0, 0, 0, 0]
@@ -534,9 +558,9 @@ export function renderSimpleMarkdown(markdown: string, options: SimpleMarkdownRe
     env.authToken = options.authToken
   }
   
-  const processedContent = processLatex(normalized)
-  
-  return markdownRenderer.render(processedContent, env)
+  const extract = extractLatex(normalized)
+  const rendered = markdownRenderer.render(extract.text, env)
+  return restoreLatex(rendered, extract)
 }
 
 export function extractTocHeadings(markdown: string): { level: number; text: string; id: string }[] {

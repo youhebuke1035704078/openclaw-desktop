@@ -235,7 +235,8 @@ async function openEditModal(serverId: string) {
 
   probeResult.value = null
   showAddModal.value = true
-  setTimeout(() => probeServer(), 200)
+  if (probeTimer) clearTimeout(probeTimer)
+  probeTimer = setTimeout(() => probeServer(), 200)
 }
 
 const canSave = computed(() => {

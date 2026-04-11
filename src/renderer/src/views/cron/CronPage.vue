@@ -816,15 +816,27 @@ const runColumns = computed<DataTableColumns<CronRunLogEntry>>(() => [
 ])
 
 onMounted(async () => {
-  await Promise.all([
+  // Use allSettled so a single RPC failure (e.g. transient network drop)
+  // doesn't reject onMounted as an unhandled promise rejection and leave
+  // the page in a half-initialised state.
+  const results = await Promise.allSettled([
     cronStore.fetchOverview(),
     modelStore.fetchModels(),
     configStore.fetchConfig(),
     sessionStore.fetchSessions(),
   ])
+  for (const r of results) {
+    if (r.status === 'rejected') {
+      console.warn('[CronPage] initial fetch failed:', r.reason)
+    }
+  }
   const firstJob = cronStore.jobs[0]
   if (firstJob) {
-    await cronStore.fetchRuns(firstJob.id)
+    try {
+      await cronStore.fetchRuns(firstJob.id)
+    } catch (e) {
+      console.warn('[CronPage] fetchRuns failed:', e)
+    }
   }
 })
 

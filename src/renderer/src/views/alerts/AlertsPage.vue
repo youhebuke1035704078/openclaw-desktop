@@ -15,6 +15,7 @@ import { RefreshOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useCronStore } from '@/stores/cron'
+import { isChannelLinked } from '@/utils/health'
 
 interface GatewayAlert {
   id: string
@@ -78,14 +79,18 @@ async function refresh() {
         // Check individual channels for issues
         if (health.channels) {
           for (const [name, ch] of Object.entries(health.channels)) {
-            const notOk = ch.configured && !ch.linked
+            // Use isChannelLinked() so multi-account channels (where the
+            // per-account `linked` lives under `ch.accounts`, not at the
+            // top level) aren't flagged as abnormal just because the
+            // top-level `linked` field is undefined.
+            const notOk = ch.configured && !isChannelLinked(ch)
             if (notOk) {
               collected.push({
                 id: `channel-${name}`,
                 severity: 'warning',
                 state: 'active',
                 title: `${t('pages.alerts.channelIssue')}: ${name}`,
-                message: `configured=${ch.configured} linked=${ch.linked}`,
+                message: `configured=${ch.configured} linked=${isChannelLinked(ch)}`,
                 source: name,
                 createdAt: new Date().toISOString(),
               })

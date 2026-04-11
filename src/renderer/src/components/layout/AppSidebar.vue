@@ -24,6 +24,7 @@ import {
   NotificationsOutline,
 } from '@vicons/ionicons5'
 import { routes } from '@/router/routes'
+import { safeGet, safeSet } from '@/utils/safe-storage'
 
 defineProps<{ collapsed: boolean }>()
 
@@ -75,7 +76,7 @@ const STORAGE_KEY = 'sidebar-menu-order'
 
 function loadOrder(): string[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = safeGet(STORAGE_KEY)
     return raw ? JSON.parse(raw) : []
   } catch {
     return []
@@ -83,7 +84,7 @@ function loadOrder(): string[] {
 }
 
 function saveOrder(keys: string[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(keys))
+  safeSet(STORAGE_KEY, JSON.stringify(keys))
 }
 
 const menuOrder = ref<string[]>(loadOrder())

@@ -49,6 +49,18 @@ interface ToolProgress {
 const MAX_AGENT_STEPS = 30
 const TOOL_PREVIEW_MAX_CHARS = 6000
 const FINALIZED_RUN_TTL_MS = 5 * 60 * 1000
+/**
+ * Upper bound on in-memory chat messages. Rendering thousands of messages
+ * at once is a memory hazard: each message keeps its own markdown render,
+ * tool-call preview, and DOM subtree. We keep the most recent N and drop
+ * the oldest. The backend remains the source of truth for full history.
+ */
+const MAX_MESSAGES_IN_MEMORY = 2000
+
+function capMessages(list: readonly ChatMessage[]): ChatMessage[] {
+  if (list.length <= MAX_MESSAGES_IN_MEMORY) return [...list]
+  return list.slice(list.length - MAX_MESSAGES_IN_MEMORY)
+}
 
 export const useChatStore = defineStore('chat', () => {
   const CONTEXT_COMPACTION_DETAIL_ZH = '上下文压缩中...'
@@ -345,18 +357,25 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const normalizedKey = key.trim()
       sessionKey.value = normalizedKey
-      messages.value = await wsStore.rpc.listChatHistory(normalizedKey)
+      const fetched = await wsStore.rpc.listChatHistory(normalizedKey)
+      // Rapid session switches can cause an older response to arrive after
+      // a newer one — drop it if the active session has since changed.
+      if (sessionKey.value !== normalizedKey) return
+      messages.value = capMessages(fetched)
       lastSyncedAt.value = Date.now()
     } catch (error) {
+      if (sessionKey.value !== key.trim()) return
       if (!silent || clearError) {
         lastError.value = error instanceof Error ? error.message : String(error)
       }
       console.error('[ChatStore] fetchHistory failed:', error)
     } finally {
-      if (silent) {
-        syncing.value = false
-      } else {
-        loading.value = false
+      if (sessionKey.value === key.trim()) {
+        if (silent) {
+          syncing.value = false
+        } else {
+          loading.value = false
+        }
       }
     }
   }
@@ -561,7 +580,7 @@ export const useChatStore = defineStore('chat', () => {
       list.push(next)
     }
 
-    messages.value = list
+    messages.value = capMessages(list)
   }
 
   function handleRealtimeEvent(
@@ -894,7 +913,7 @@ export const useChatStore = defineStore('chat', () => {
       content: text,
       timestamp: new Date().toISOString(),
     }
-    messages.value = [...messages.value, localMessage]
+    messages.value = capMessages([...messages.value, localMessage])
 
     sending.value = true
     lastError.value = null

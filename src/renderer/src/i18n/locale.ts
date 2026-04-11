@@ -1,3 +1,5 @@
+import { safeGet, safeSet } from '@/utils/safe-storage'
+
 export type AppLocale = 'zh-CN' | 'en-US'
 
 const STORAGE_KEY = 'openclaw_locale'
@@ -30,8 +32,7 @@ export function getSystemLocale(): AppLocale {
 }
 
 export function getStoredLocale(): AppLocale | null {
-  if (typeof window === 'undefined') return null
-  return normalizeLocale(window.localStorage.getItem(STORAGE_KEY))
+  return normalizeLocale(safeGet(STORAGE_KEY))
 }
 
 export function getPreferredLocale(): AppLocale {
@@ -39,8 +40,7 @@ export function getPreferredLocale(): AppLocale {
 }
 
 export function saveLocale(locale: AppLocale): void {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(STORAGE_KEY, locale)
+  safeSet(STORAGE_KEY, locale)
 }
 
 export const LOCALE_STORAGE_KEY = STORAGE_KEY

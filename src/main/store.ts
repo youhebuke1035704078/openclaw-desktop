@@ -29,13 +29,16 @@ export function saveServer(server: {
   password: string
 }): void {
   const servers = store.get('servers')
-  const encryptionOk = safeStorage.isEncryptionAvailable()
-  if (!encryptionOk) {
-    console.warn('[store] ⚠️  safeStorage encryption not available — credentials stored with base64 encoding only (NOT encrypted). This is insecure.')
+  if (!safeStorage.isEncryptionAvailable()) {
+    // Fail loudly instead of silently falling back to base64 — plain base64 is
+    // trivially reversible and would give a false sense of security. The
+    // renderer surfaces this error to the user so they can switch to a
+    // platform with a working keychain / credential manager.
+    throw new Error(
+      'System keychain/credential manager is unavailable. Credentials cannot be stored securely on this machine.'
+    )
   }
-  const encrypted = encryptionOk
-    ? safeStorage.encryptString(server.password).toString('base64')
-    : Buffer.from(server.password).toString('base64')
+  const encrypted = safeStorage.encryptString(server.password).toString('base64')
 
   const entry: ServerConfig = {
     id: server.id,
@@ -61,8 +64,10 @@ export function removeServer(id: string): void {
 export function decryptPassword(id: string): string | null {
   const server = store.get('servers').find((s) => s.id === id)
   if (!server) return null
-  const buf = Buffer.from(server.encryptedPassword, 'base64')
-  return safeStorage.isEncryptionAvailable()
-    ? safeStorage.decryptString(buf)
-    : buf.toString('utf-8')
+  if (!safeStorage.isEncryptionAvailable()) return null
+  try {
+    return safeStorage.decryptString(Buffer.from(server.encryptedPassword, 'base64'))
+  } catch {
+    return null
+  }
 }

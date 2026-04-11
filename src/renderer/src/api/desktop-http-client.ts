@@ -122,33 +122,3 @@ export async function authFetch(path: string, init?: RequestInit): Promise<Respo
   return res
 }
 
-// SSE connection for real-time events
-//
-// ⚠️  Known limitation: the auth token is passed via URL query parameter because
-// the native EventSource API does not support custom headers.
-// This means the token may appear in server access logs and proxy logs.
-// For an Electron desktop app on local/private networks the risk is minimal.
-// TODO: Consider migrating to fetch + ReadableStream for header-based auth.
-export function connectSSE(
-  onEvent: (event: { type: string; data: unknown }) => void,
-  onError?: (error: Event) => void
-): EventSource | null {
-  if (!baseURL) return null
-  const url = `${baseURL}/api/events${authToken ? `?token=${authToken}` : ''}`
-  const source = new EventSource(url)
-
-  source.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data)
-      onEvent(data)
-    } catch {
-      // ignore parse errors
-    }
-  }
-
-  source.onerror = (e) => {
-    onError?.(e)
-  }
-
-  return source
-}

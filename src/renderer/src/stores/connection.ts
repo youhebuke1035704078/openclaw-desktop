@@ -4,6 +4,7 @@ import { setBaseURL, clearAuthToken } from '@/api/desktop-http-client'
 import { ConnectionState } from '@/api/types'
 import { useAuthStore } from './auth'
 import { useWebSocketStore } from './websocket'
+import { safeGet, safeSet } from '@/utils/safe-storage'
 
 export interface ServerConfig {
   id: string
@@ -114,7 +115,7 @@ export const useConnectionStore = defineStore('connection', () => {
       status.value = 'connected'
 
       // Remember last connected server for auto-reconnect after app restart (e.g. update)
-      try { localStorage.setItem('lastConnectedServerId', serverId) } catch { /* */ }
+      safeSet('lastConnectedServerId', serverId)
 
       // Keep connectionStore.status in sync with wsStore.state for post-connect
       // state changes (e.g. WS drop → reconnecting → reconnected / failed)
@@ -173,7 +174,7 @@ export const useConnectionStore = defineStore('connection', () => {
    * Returns true on success, false if no last server or connect failed.
    */
   async function autoConnect(): Promise<boolean> {
-    const lastId = localStorage.getItem('lastConnectedServerId')
+    const lastId = safeGet('lastConnectedServerId')
     if (!lastId) return false
 
     await loadServers()

@@ -15,12 +15,17 @@
  */
 import { ipcMain, type WebContents } from 'electron'
 import WebSocket from 'ws'
-import { appendFileSync } from 'fs'
 
-function dbg(...args: unknown[]) {
-  const line = '[ws-bridge] ' + args.map(String).join(' ') + '\n'
-  process.stderr.write(line)
-  try { appendFileSync('/tmp/ws-bridge.log', new Date().toISOString() + ' ' + line) } catch { /* */ }
+// Debug logging: gated behind OC_WS_DEBUG env var so production builds don't
+// flood stderr or leak JSON-RPC payload previews. The previous implementation
+// unconditionally appended every message to /tmp/ws-bridge.log which (1) grew
+// unbounded on macOS/Linux, (2) silently failed on Windows where /tmp doesn't
+// exist, and (3) persisted fragments of auth-bearing WebSocket traffic.
+const DEBUG_WS = !!process.env.OC_WS_DEBUG
+
+function dbg(...args: unknown[]): void {
+  if (!DEBUG_WS) return
+  process.stderr.write('[ws-bridge] ' + args.map(String).join(' ') + '\n')
 }
 
 let ws: WebSocket | null = null
@@ -38,9 +43,32 @@ function safeClose(socket: WebSocket | null, code?: number, reason?: string): vo
   }
 }
 
+/** Validate that a URL uses an allowed WebSocket scheme. */
+function isSafeWsUrl(url: string): boolean {
+  try {
+    const u = new URL(url)
+    return u.protocol === 'ws:' || u.protocol === 'wss:'
+  } catch {
+    return false
+  }
+}
+
+/** Cleanup any open socket on app shutdown — exported for main/index.ts to call. */
+export function shutdownWsBridge(): void {
+  safeClose(ws, 1001, 'app shutting down')
+  ws = null
+}
+
 export function registerWsBridge(): void {
   ipcMain.handle('ws:connect', (event, url: string, origin?: string) => {
     dbg('ws:connect called, url =', url, 'origin =', origin)
+    if (!isSafeWsUrl(url)) {
+      dbg('ws:connect BLOCKED — invalid scheme:', url)
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('ws:error', 'Blocked: only ws/wss URLs are allowed')
+      }
+      return
+    }
     // Tear down previous connection
     safeClose(ws)
     ws = null

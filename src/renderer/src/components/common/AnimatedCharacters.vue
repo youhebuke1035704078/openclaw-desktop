@@ -25,96 +25,88 @@ const blackRef = ref<HTMLElement | null>(null)
 const yellowRef = ref<HTMLElement | null>(null)
 const orangeRef = ref<HTMLElement | null>(null)
 
+const handleMouseMove = (e: MouseEvent): void => {
+  mouseX.value = e.clientX
+  mouseY.value = e.clientY
+}
+
+// Track every timer we create so onUnmounted can clear them all.
+const timers = new Set<number>()
+const setTrackedTimeout = (fn: () => void, ms: number): number => {
+  const id = window.setTimeout(() => {
+    timers.delete(id)
+    fn()
+  }, ms)
+  timers.add(id)
+  return id
+}
+
+const schedulePurpleBlink = (): void => {
+  const delay = Math.random() * 4000 + 3000
+  setTrackedTimeout(() => {
+    isPurpleBlinking.value = true
+    setTrackedTimeout(() => {
+      isPurpleBlinking.value = false
+      schedulePurpleBlink()
+    }, 150)
+  }, delay)
+}
+
+const scheduleBlackBlink = (): void => {
+  const delay = Math.random() * 4000 + 3000
+  setTrackedTimeout(() => {
+    isBlackBlinking.value = true
+    setTrackedTimeout(() => {
+      isBlackBlinking.value = false
+      scheduleBlackBlink()
+    }, 150)
+  }, delay)
+}
+
 onMounted(() => {
-  const handleMouseMove = (e: MouseEvent) => {
-    mouseX.value = e.clientX
-    mouseY.value = e.clientY
-  }
   window.addEventListener('mousemove', handleMouseMove)
-  
-  onUnmounted(() => {
-    window.removeEventListener('mousemove', handleMouseMove)
-  })
-})
-
-const schedulePurpleBlink = () => {
-  const getRandomBlinkInterval = () => Math.random() * 4000 + 3000
-  let timeout: number
-  
-  const schedule = () => {
-    timeout = window.setTimeout(() => {
-      isPurpleBlinking.value = true
-      setTimeout(() => {
-        isPurpleBlinking.value = false
-        schedule()
-      }, 150)
-    }, getRandomBlinkInterval())
-  }
-  
-  schedule()
-  return () => clearTimeout(timeout)
-}
-
-const scheduleBlackBlink = () => {
-  const getRandomBlinkInterval = () => Math.random() * 4000 + 3000
-  let timeout: number
-  
-  const schedule = () => {
-    timeout = window.setTimeout(() => {
-      isBlackBlinking.value = true
-      setTimeout(() => {
-        isBlackBlinking.value = false
-        schedule()
-      }, 150)
-    }, getRandomBlinkInterval())
-  }
-  
-  schedule()
-  return () => clearTimeout(timeout)
-}
-
-let purpleBlinkCleanup: (() => void) | null = null
-let blackBlinkCleanup: (() => void) | null = null
-
-onMounted(() => {
-  purpleBlinkCleanup = schedulePurpleBlink()
-  blackBlinkCleanup = scheduleBlackBlink()
+  schedulePurpleBlink()
+  scheduleBlackBlink()
 })
 
 onUnmounted(() => {
-  purpleBlinkCleanup?.()
-  blackBlinkCleanup?.()
+  window.removeEventListener('mousemove', handleMouseMove)
+  for (const id of timers) clearTimeout(id)
+  timers.clear()
 })
 
-watch(() => props.isTyping, (newVal) => {
-  if (newVal) {
-    isLookingAtEachOther.value = true
-    setTimeout(() => {
+watch(
+  () => props.isTyping,
+  (newVal, _old, onCleanup) => {
+    if (newVal) {
+      isLookingAtEachOther.value = true
+      const id = setTrackedTimeout(() => {
+        isLookingAtEachOther.value = false
+      }, 800)
+      onCleanup(() => clearTimeout(id))
+    } else {
       isLookingAtEachOther.value = false
-    }, 800)
-  } else {
-    isLookingAtEachOther.value = false
+    }
   }
-})
+)
 
-watch([() => props.passwordLength, () => props.showPassword, isPurplePeeking], ([len, show, peeking]) => {
-  if (len > 0 && show && !peeking) {
-    const schedulePeek = () => {
-      const peekInterval = window.setTimeout(() => {
+watch(
+  [() => props.passwordLength, () => props.showPassword, isPurplePeeking],
+  ([len, show, peeking], _old, onCleanup) => {
+    if (len > 0 && show && !peeking) {
+      const peekInterval = setTrackedTimeout(() => {
         isPurplePeeking.value = true
-        setTimeout(() => {
+        const resetId = setTrackedTimeout(() => {
           isPurplePeeking.value = false
         }, 800)
+        onCleanup(() => clearTimeout(resetId))
       }, Math.random() * 3000 + 2000)
-      return peekInterval
+      onCleanup(() => clearTimeout(peekInterval))
+    } else if (!(len > 0 && show)) {
+      isPurplePeeking.value = false
     }
-    const firstPeek = schedulePeek()
-    return () => clearTimeout(firstPeek)
-  } else if (!(len > 0 && show)) {
-    isPurplePeeking.value = false
   }
-  return undefined
-})
+)
 
 const isHidingPassword = computed(() => props.passwordLength > 0 && !props.showPassword)
 

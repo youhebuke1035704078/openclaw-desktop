@@ -1,4 +1,5 @@
 import { onUnmounted, ref, watch, type Ref } from 'vue'
+import { safeGet, safeSet } from '@/utils/safe-storage'
 
 export interface UseResizableOptions {
   minWidth?: number
@@ -24,7 +25,7 @@ export function useResizable(
   const isResizing = ref(false)
 
   if (storageKey) {
-    const stored = localStorage.getItem(storageKey)
+    const stored = safeGet(storageKey)
     if (stored) {
       const parsed = parseInt(stored, 10)
       if (!isNaN(parsed) && parsed >= minWidth && parsed <= maxWidth) {
@@ -79,7 +80,7 @@ export function useResizable(
     document.body.style.userSelect = ''
 
     if (storageKey) {
-      localStorage.setItem(storageKey, String(width.value))
+      safeSet(storageKey, String(width.value))
     }
   }
 

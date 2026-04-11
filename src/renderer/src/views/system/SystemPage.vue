@@ -33,6 +33,7 @@ import { useI18n } from 'vue-i18n'
 import { useWebSocketStore } from '@/stores/websocket'
 import { ConnectionState } from '@/api/types'
 import { formatRelativeTime } from '@/utils/format'
+import { isChannelLinked } from '@/utils/health'
 import type { HealthSummary, HealthChannelSummary, SystemPresenceEntry } from '@/api/types'
 
 interface ChannelEntry {
@@ -65,6 +66,7 @@ const latestVersion = ref<string | null>(null)
 const updateStatusMessage = ref('')
 const updateProgress = ref(0)
 let progressTimer: ReturnType<typeof setInterval> | null = null
+let resetStatusTimer: ReturnType<typeof setTimeout> | null = null
 
 const hasUpdate = computed(() => {
   if (wsStore.gatewayVersion && latestVersion.value) {
@@ -158,7 +160,12 @@ async function handleUpgrade() {
     }
   }
   isUpdating.value = false
-  setTimeout(() => { updateStatusMessage.value = ''; updateProgress.value = 0 }, 8000)
+  if (resetStatusTimer) clearTimeout(resetStatusTimer)
+  resetStatusTimer = setTimeout(() => {
+    updateStatusMessage.value = ''
+    updateProgress.value = 0
+    resetStatusTimer = null
+  }, 8000)
 }
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
@@ -186,7 +193,11 @@ const uptime = computed(() =>
 const selfPresence = computed(() => presenceEntries.value[0] ?? null)
 
 function channelStatus(ch: HealthChannelSummary): 'running' | 'configured' | 'offline' {
-  if (ch.configured && ch.linked) return 'running'
+  // Use isChannelLinked() so multi-account channels (feishu et al.) — where
+  // per-account `linked` lives under `ch.accounts` rather than the top-level
+  // `linked` — are correctly classified as "running" when at least one account
+  // is actually linked, instead of falling through to "configured".
+  if (ch.configured && isChannelLinked(ch)) return 'running'
   if (ch.configured) return 'configured'
   return 'offline'
 }
@@ -230,6 +241,13 @@ async function fetchData() {
   }
 }
 
+/** Manual refresh — user-initiated, so also re-query npm for new OpenClaw versions.
+ *  The periodic background refresh intentionally skips npm to avoid hammering
+ *  the registry; users expect a click on "Refresh" to re-check everything. */
+async function manualRefresh() {
+  await Promise.all([fetchData(), fetchNpmVersions()])
+}
+
 function openRestartModal() {
   restartResult.value = null
   restartDelaySec.value = 3
@@ -269,6 +287,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  if (progressTimer) clearInterval(progressTimer)
+  if (resetStatusTimer) clearTimeout(resetStatusTimer)
 })
 </script>
 
@@ -276,7 +296,7 @@ onUnmounted(() => {
   <NSpace vertical :size="16">
     <NCard :title="t('routes.system')" class="app-card">
       <template #header-extra>
-        <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" :loading="loading" @click="fetchData">
+        <NButton size="small" class="app-toolbar-btn app-toolbar-btn--refresh" :loading="loading || isLoadingVersions" @click="manualRefresh">
           <template #icon><NIcon :component="RefreshOutline" /></template>
           {{ t('common.refresh') }}
         </NButton>

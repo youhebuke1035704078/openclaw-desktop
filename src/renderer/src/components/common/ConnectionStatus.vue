@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { NTag, NSpace, NButton, NPopover, NProgress } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 // ── Desktop App self-update ──
 const appVersion = ref('')
@@ -15,12 +18,16 @@ const appChecking = ref(false)
 const installCountdown = ref(0)
 
 const updateStatusText = computed(() => {
-  if (installCountdown.value > 0) return `${installCountdown.value}s 后自动安装...`
-  if (appDownloaded.value) return '新版本已就绪'
-  if (appDownloading.value) return `下载中 ${Math.round(appDownloadPercent.value)}%`
-  if (appUpdateAvailable.value) return '检测到新版本'
-  if (appChecking.value) return '检查中...'
-  return '已是最新'
+  if (installCountdown.value > 0)
+    return t('components.connectionStatus.installingIn', { count: installCountdown.value })
+  if (appDownloaded.value) return t('components.connectionStatus.ready')
+  if (appDownloading.value)
+    return t('components.connectionStatus.downloading', {
+      percent: Math.round(appDownloadPercent.value),
+    })
+  if (appUpdateAvailable.value) return t('components.connectionStatus.updateDetected')
+  if (appChecking.value) return t('components.connectionStatus.checking')
+  return t('components.connectionStatus.upToDate')
 })
 
 let unsubUpdater: (() => void) | null = null
@@ -60,7 +67,7 @@ onMounted(async () => {
         case 'error':
           appChecking.value = false
           appDownloading.value = false
-          appUpdateError.value = data.error || '更新失败'
+          appUpdateError.value = data.error || t('components.connectionStatus.updateFailed')
           break
       }
     })
@@ -70,6 +77,10 @@ onMounted(async () => {
 onUnmounted(() => {
   unsubUpdater?.()
   unsubUpdater = null
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
 })
 
 async function checkAppUpdate() {
@@ -127,7 +138,10 @@ function installAppUpdate() {
     </template>
     <div style="padding: 12px;">
       <div style="margin-bottom: 8px; font-size: 13px;">
-        当前 Desktop 版本 v{{ appVersion }}{{ appUpdateAvailable && appNewVersion ? `，可升级到 v${appNewVersion}` : '' }}
+        {{ t('components.connectionStatus.currentVersion', { version: appVersion })
+        }}{{ appUpdateAvailable && appNewVersion
+          ? t('components.connectionStatus.upgradableTo', { version: appNewVersion })
+          : '' }}
       </div>
 
       <!-- Download progress -->
@@ -150,7 +164,9 @@ function installAppUpdate() {
           :disabled="appChecking"
           @click="checkAppUpdate"
         >
-          {{ appChecking ? '检查中...' : '检查新版本' }}
+          {{ appChecking
+            ? t('components.connectionStatus.checking')
+            : t('components.connectionStatus.checkForUpdate') }}
         </NButton>
         <!-- Downloaded: install now (or wait for countdown) -->
         <NButton
@@ -159,7 +175,9 @@ function installAppUpdate() {
           type="primary"
           @click="installAppUpdate"
         >
-          {{ installCountdown > 0 ? `${installCountdown}s 后自动安装` : '立即安装' }}
+          {{ installCountdown > 0
+            ? t('components.connectionStatus.installingInShort', { count: installCountdown })
+            : t('components.connectionStatus.installNow') }}
         </NButton>
       </NSpace>
 
@@ -167,10 +185,10 @@ function installAppUpdate() {
         {{ appUpdateError }}
       </div>
       <div v-else-if="appDownloading" style="margin-top: 6px; font-size: 12px; color: var(--text-color-3);">
-        正在后台下载新版本...
+        {{ t('components.connectionStatus.downloadingInBackground') }}
       </div>
       <div v-else-if="!appUpdateAvailable && !appDownloading && !appDownloaded && !appChecking" style="margin-top: 6px; font-size: 12px; color: var(--text-color-3);">
-        点击检查是否有新版本可用
+        {{ t('components.connectionStatus.clickToCheck') }}
       </div>
     </div>
   </NPopover>

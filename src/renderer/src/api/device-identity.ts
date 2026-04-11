@@ -1,4 +1,5 @@
 import { getPublicKeyAsync, signAsync, utils } from '@noble/ed25519'
+import { safeGet, safeSet } from '@/utils/safe-storage'
 
 type StoredIdentity = {
   version: 1
@@ -62,7 +63,7 @@ async function generateIdentity(): Promise<DeviceIdentity> {
 
 export async function loadOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = safeGet(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as StoredIdentity
       if (
@@ -77,7 +78,7 @@ export async function loadOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
             ...parsed,
             deviceId: derivedId,
           }
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+          safeSet(STORAGE_KEY, JSON.stringify(updated))
           return {
             deviceId: derivedId,
             publicKey: parsed.publicKey,
@@ -103,7 +104,7 @@ export async function loadOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
     privateKey: identity.privateKey,
     createdAtMs: Date.now(),
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(stored))
+  safeSet(STORAGE_KEY, JSON.stringify(stored))
   return identity
 }
 
