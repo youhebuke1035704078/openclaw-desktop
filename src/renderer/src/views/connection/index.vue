@@ -15,7 +15,6 @@ import {
   NIcon,
   NTooltip,
   NEmpty,
-  NSelect,
   NSpin,
   useMessage,
 } from 'naive-ui'
@@ -56,19 +55,12 @@ const probeResult = ref<null | {
   gateway?: string
 }>(null)
 
-const platformOptions = [
-  { label: 'macOS', value: 'macos' },
-  { label: 'Windows', value: 'windows' },
-  { label: 'Linux', value: 'linux' },
-]
-
 const form = ref({
   id: '',
   name: '',
   url: '',
   username: '',
   password: '',
-  platform: 'macos',
 })
 
 const normalizedUrl = computed(() => {
@@ -210,7 +202,7 @@ function healthLabel(id: string): string {
 
 function openAddModal() {
   editingServerId.value = null
-  form.value = { id: uuid(), name: '', url: '', username: '', password: '', platform: 'macos' }
+  form.value = { id: uuid(), name: '', url: '', username: '', password: '' }
   probeResult.value = null
   showAddModal.value = true
 }
@@ -230,7 +222,6 @@ async function openEditModal(serverId: string) {
     url: server.url.replace(/^https?:\/\//, ''),
     username: isNoAuth ? '' : server.username,
     password: isNoAuth ? '' : (decryptedPw || ''),
-    platform: 'macos',
   }
 
   probeResult.value = null
@@ -240,23 +231,43 @@ async function openEditModal(serverId: string) {
 }
 
 const canSave = computed(() => {
-  if (!form.value.name || !normalizedUrl.value) return false
+  // Address is always required
+  if (!normalizedUrl.value) return false
+  // If server confirmed no-auth, no token needed
   if (probeResult.value?.reachable && !probeResult.value.authEnabled) {
     return true
   }
-  return !!form.value.username && !!form.value.password
+  // Otherwise token is required (username is optional)
+  return !!form.value.password
 })
 
 async function handleSave() {
-  if (!form.value.name || !normalizedUrl.value) {
+  if (!normalizedUrl.value) {
     message.warning(t('pages.connection.validationNameUrl'))
     return
   }
 
   const isConfirmedNoAuth = probeResult.value?.reachable && !probeResult.value.authEnabled
-  if (!isConfirmedNoAuth && (!form.value.username || !form.value.password)) {
+  if (!isConfirmedNoAuth && !form.value.password) {
     message.warning(t('pages.connection.validationCredentials'))
     return
+  }
+
+  // Auto-fill name from hostname if left empty
+  if (!form.value.name) {
+    try {
+      const u = new URL(normalizedUrl.value)
+      form.value.name = u.hostname === 'localhost' || u.hostname === '127.0.0.1'
+        ? t('pages.connection.localServer')
+        : u.hostname
+    } catch {
+      form.value.name = normalizedUrl.value
+    }
+  }
+
+  // Auto-fill username if left empty (display-only field)
+  if (!form.value.username && !isConfirmedNoAuth) {
+    form.value.username = 'admin'
   }
 
   try {
@@ -457,9 +468,15 @@ async function handleDelete(serverId: string) {
       style="width: 520px"
       :bordered="false"
     >
-      <NForm label-placement="left" label-width="80">
-        <!-- Step 1: URL -->
+      <NForm label-placement="left" label-width="90">
+        <!-- ═══ Required: Address ═══ -->
         <NFormItem :label="t('pages.connection.labelAddress')">
+          <template #label>
+            <div>
+              <span>{{ t('pages.connection.labelAddress') }}</span>
+              <div style="font-size: 11px; color: #e8884a; font-weight: normal; white-space: nowrap;">{{ t('pages.connection.labelAddressRequired') }}</div>
+            </div>
+          </template>
           <NInput v-model:value="form.url" :placeholder="t('pages.connection.placeholderAddress')">
             <template #suffix>
               <NSpin v-if="probing" :size="14" />
@@ -486,25 +503,44 @@ async function handleDelete(serverId: string) {
           {{ t('pages.connection.httpWarning') }}
         </NAlert>
 
-        <!-- Step 2: Name + Platform -->
-        <NFormItem :label="t('pages.connection.labelName')">
-          <NInput v-model:value="form.name" :placeholder="t('pages.connection.placeholderName')" />
-        </NFormItem>
-        <NFormItem :label="t('pages.connection.labelPlatform')">
-          <NSelect v-model:value="form.platform" :options="platformOptions" />
-        </NFormItem>
-
-        <!-- Step 3: Credentials (only if auth enabled or unknown) -->
+        <!-- ═══ Required: Gateway Token (only if auth enabled or unknown) ═══ -->
         <template v-if="!probeResult || probeResult.authEnabled">
-          <NFormItem :label="t('pages.connection.labelUsername')">
-            <NInput v-model:value="form.username" :placeholder="t('pages.connection.placeholderUsername')" />
-          </NFormItem>
-          <NFormItem :label="t('pages.connection.labelToken')">
+          <NFormItem>
+            <template #label>
+              <div>
+                <span style="white-space: pre-line;">{{ t('pages.connection.labelToken') }}</span>
+                <div style="font-size: 11px; color: #e8884a; font-weight: normal; white-space: nowrap;">{{ t('pages.connection.labelTokenRequired') }}</div>
+              </div>
+            </template>
             <NInput v-model:value="form.password" type="password" show-password-on="click" :placeholder="t('pages.connection.placeholderToken')" />
           </NFormItem>
           <NAlert :bordered="false" type="info" style="margin-bottom: 16px; font-size: 12px;">
             {{ t('pages.connection.tokenHint') }}
           </NAlert>
+        </template>
+
+        <!-- ═══ Optional: Name ═══ -->
+        <NFormItem>
+          <template #label>
+            <div>
+              <span>{{ t('pages.connection.labelName') }}</span>
+              <div style="font-size: 11px; color: #909399; font-weight: normal;">{{ t('pages.connection.labelNameOptional') }}</div>
+            </div>
+          </template>
+          <NInput v-model:value="form.name" :placeholder="t('pages.connection.placeholderName')" />
+        </NFormItem>
+
+        <!-- ═══ Optional: Username ═══ -->
+        <template v-if="!probeResult || probeResult.authEnabled">
+          <NFormItem>
+            <template #label>
+              <div>
+                <span>{{ t('pages.connection.labelUsername') }}</span>
+                <div style="font-size: 11px; color: #909399; font-weight: normal;">{{ t('pages.connection.labelUsernameOptional') }}</div>
+              </div>
+            </template>
+            <NInput v-model:value="form.username" :placeholder="t('pages.connection.placeholderUsername')" />
+          </NFormItem>
         </template>
 
         <!-- Manual probe button -->
