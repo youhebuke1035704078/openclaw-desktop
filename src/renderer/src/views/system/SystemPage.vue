@@ -63,31 +63,66 @@ const selectedVersion = ref('')
 const versionOptions = ref<Array<{ label: string; value: string }>>([])
 const isLoadingVersions = ref(false)
 const latestVersion = ref<string | null>(null)
+// Explicit status lets the UI distinguish "successfully checked and up to
+// date" from "couldn't check at all" — previously both states showed
+// "已是最新", which silently lied when npm was unreachable / not in PATH.
+type VersionCheckStatus = 'idle' | 'loading' | 'success' | 'error'
+const versionCheckStatus = ref<VersionCheckStatus>('idle')
+const versionCheckError = ref<string>('')
 const updateStatusMessage = ref('')
 const updateProgress = ref(0)
 let progressTimer: ReturnType<typeof setInterval> | null = null
 let resetStatusTimer: ReturnType<typeof setTimeout> | null = null
 
+// We can only make a definitive "up to date" claim when BOTH sides of the
+// comparison are known — the currently running Gateway version (from ws
+// presence) and the latest published npm version. Missing either one means
+// the UI must fall back to a neutral state rather than lying with "已是最新".
+const versionComparable = computed(
+  () => !!wsStore.gatewayVersion && versionCheckStatus.value === 'success' && !!latestVersion.value,
+)
+
 const hasUpdate = computed(() => {
-  if (wsStore.gatewayVersion && latestVersion.value) {
-    return wsStore.gatewayVersion !== latestVersion.value
-  }
-  return false
+  if (!versionComparable.value) return false
+  return wsStore.gatewayVersion !== latestVersion.value
 })
+
+const versionCheckFailed = computed(() => versionCheckStatus.value === 'error')
+const versionIsUpToDate = computed(() => versionComparable.value && !hasUpdate.value)
 
 async function fetchNpmVersions() {
   isLoadingVersions.value = true
+  versionCheckStatus.value = 'loading'
+  versionCheckError.value = ''
   try {
     const api = (window as any).api
-    if (!api?.npmVersions) return
-    const result = await api.npmVersions()
-    const versions: string[] = result.ok ? result.versions : []
-    if (versions.length > 0) {
-      latestVersion.value = versions[0]
-      versionOptions.value = versions.slice(0, 20).map((v: string) => ({ label: v, value: v }))
-      selectedVersion.value = versions[0]
+    if (!api?.npmVersions) {
+      versionCheckStatus.value = 'error'
+      versionCheckError.value = 'npm bridge unavailable'
+      return
     }
-  } catch { /* */ } finally {
+    const result = await api.npmVersions()
+    if (!result?.ok) {
+      versionCheckStatus.value = 'error'
+      versionCheckError.value = result?.error || 'npm view failed'
+      console.warn('[SystemPage] fetchNpmVersions failed:', versionCheckError.value)
+      return
+    }
+    const versions: string[] = Array.isArray(result.versions) ? result.versions : []
+    if (versions.length === 0) {
+      versionCheckStatus.value = 'error'
+      versionCheckError.value = 'npm returned no versions'
+      return
+    }
+    latestVersion.value = versions[0] ?? null
+    versionOptions.value = versions.slice(0, 20).map((v: string) => ({ label: v, value: v }))
+    selectedVersion.value = versions[0] ?? ''
+    versionCheckStatus.value = 'success'
+  } catch (e: unknown) {
+    versionCheckStatus.value = 'error'
+    versionCheckError.value = e instanceof Error ? e.message : String(e)
+    console.warn('[SystemPage] fetchNpmVersions threw:', e)
+  } finally {
     isLoadingVersions.value = false
   }
 }
@@ -352,24 +387,39 @@ onUnmounted(() => {
         </NAlert>
 
         <!-- ─── OpenClaw Version Upgrade ─── -->
-        <NCard size="small" embedded style="margin-top: 12px;" class="svc-card" :class="hasUpdate ? 'svc-card--configured' : 'svc-card--running'">
+        <NCard
+          size="small"
+          embedded
+          style="margin-top: 12px;"
+          class="svc-card"
+          :class="hasUpdate ? 'svc-card--configured' : (versionCheckFailed ? 'svc-card--offline' : 'svc-card--running')"
+        >
           <div class="svc-body">
             <div class="svc-header">
               <NSpace align="center" :size="8">
-                <NIcon :component="DownloadOutline" :color="hasUpdate ? '#f0a020' : '#18a058'" size="20" />
+                <NIcon
+                  :component="DownloadOutline"
+                  :color="hasUpdate ? '#f0a020' : (versionCheckFailed ? '#909399' : '#18a058')"
+                  size="20"
+                />
                 <NText strong>OpenClaw 版本管理</NText>
               </NSpace>
               <NTag v-if="hasUpdate" type="warning" :bordered="false" round size="small">有新版本</NTag>
-              <NTag v-else-if="!isLoadingVersions" type="success" :bordered="false" round size="small">已是最新</NTag>
+              <NTag v-else-if="versionCheckFailed" type="default" :bordered="false" round size="small">检查失败</NTag>
+              <NTag v-else-if="!isLoadingVersions && versionIsUpToDate" type="success" :bordered="false" round size="small">已是最新</NTag>
             </div>
             <NSpace :size="12" class="svc-meta" wrap align="center">
               <NText depth="3" style="font-size: 13px;">
                 当前版本: {{ wsStore.gatewayVersion || '未知' }}
                 <span v-if="isLoadingVersions" style="color: var(--text-color-3); margin-left: 6px;">版本检查中...</span>
                 <span v-else-if="hasUpdate" style="color: #f0a020; font-weight: 500; margin-left: 6px;">检测到新版本</span>
-                <span v-else style="color: #18a058; margin-left: 6px;">已是最新</span>
+                <span v-else-if="versionCheckFailed" style="color: #909399; margin-left: 6px;" :title="versionCheckError">无法获取最新版本</span>
+                <span v-else-if="versionIsUpToDate" style="color: #18a058; margin-left: 6px;">已是最新</span>
               </NText>
               <NText v-if="hasUpdate && latestVersion" depth="3" style="font-size: 13px;">最新版本: {{ latestVersion }}</NText>
+              <NText v-if="versionCheckFailed && versionCheckError" depth="3" style="font-size: 12px; color: #909399;">
+                {{ versionCheckError }}
+              </NText>
             </NSpace>
             <div v-if="hasUpdate" style="margin-top: 12px;">
               <NSpace align="center" :size="8">
